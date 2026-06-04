@@ -14,6 +14,7 @@ export interface RuntimeModelTemplate {
   description: string;
   availablePoses?: string[];
   isAiGenerated?: boolean;
+  garmentType?: string | null;
 }
 
 interface RawRuntimeModelTemplate {
@@ -30,6 +31,8 @@ interface RawRuntimeModelTemplate {
   description?: string;
   availablePoses?: string[];
   isAiGenerated?: boolean;
+  garmentType?: string | null;
+  garment_type?: string | null;
 }
 
 export interface RuntimeAiStudioSettings {
@@ -87,6 +90,7 @@ function normalizeRuntimeModelTemplate(item: RawRuntimeModelTemplate): RuntimeMo
     description: item.description || item.name,
     availablePoses: Array.isArray(item.availablePoses) ? item.availablePoses : undefined,
     isAiGenerated: Boolean(item.isAiGenerated),
+    garmentType: item.garmentType || item.garment_type || "full_body",
   };
 }
 

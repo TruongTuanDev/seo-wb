@@ -77,6 +77,73 @@ def resolve_model_image_path(model_id: str) -> Path | None:
     return None
 
 
+def select_auto_model_template(
+    db: Session,
+    garment_json: dict[str, Any],
+    analysis: dict[str, Any],
+    selected_model_gender: str | None
+) -> Any | None:
+    category = garment_json.get("category") or analysis.get("category")
+    mapped_garment_type = None
+    if category:
+        cat = category.lower().strip()
+        if any(token in cat for token in ["брюки", "штаны", "леггинсы", "джоггеры", "pants", "джинсы", "jeans", "шорты", "shorts"]):
+            mapped_garment_type = "pants"
+        elif any(token in cat for token in ["юбк", "skirt", "плать", "сарафан", "dress"]):
+            mapped_garment_type = "dress"
+        elif any(token in cat for token in ["рубаш", "блуз", "shirt", "футболк", "майк", "топ", "t-shirt", "худи", "свитшот", "толстовк", "джемпер", "свитер", "пуловер", "кардиган", "hoodie", "куртк", "пальто", "пиджак", "жилет", "ветровк", "бомбер", "jacket"]):
+            mapped_garment_type = "shirt"
+        elif any(token in cat for token in ["костюм", "комбинезон", "комплект", "set", "suit"]):
+            mapped_garment_type = "suit"
+        elif any(token in cat for token in ["обувь", "shoes", "ботин", "сапог", "кроссов"]):
+            mapped_garment_type = "shoes"
+
+    normalized_gender = str(selected_model_gender or garment_json.get("gender") or analysis.get("gender") or "female").lower()
+    model_gender = "female"
+    if any(token in normalized_gender for token in ("male", "man", "men", "boy", "муж")):
+        model_gender = "male"
+
+    from sqlalchemy import select, func, or_
+    from app.models.admin import ModelTemplate
+
+    query = select(ModelTemplate).where(
+        ModelTemplate.status == "active",
+        ModelTemplate.quality_status == "approved",
+        ModelTemplate.deleted_at.is_(None),
+        ModelTemplate.gender == model_gender
+    )
+    if mapped_garment_type:
+        query = query.where(
+            or_(
+                ModelTemplate.garment_type == mapped_garment_type,
+                ModelTemplate.garment_type == "full_body",
+                ModelTemplate.garment_type.is_(None)
+            )
+        )
+    query = query.order_by(func.random())
+    resolved_model = db.scalars(query).first()
+
+    if not resolved_model:
+        query_fb = select(ModelTemplate).where(
+            ModelTemplate.status == "active",
+            ModelTemplate.quality_status == "approved",
+            ModelTemplate.deleted_at.is_(None),
+            ModelTemplate.gender == model_gender
+        ).order_by(func.random())
+        resolved_model = db.scalars(query_fb).first()
+
+    if not resolved_model:
+        query_any = select(ModelTemplate).where(
+            ModelTemplate.status == "active",
+            ModelTemplate.quality_status == "approved",
+            ModelTemplate.deleted_at.is_(None)
+        ).order_by(func.random())
+        resolved_model = db.scalars(query_any).first()
+
+    return resolved_model
+
+
+
 def _runtime_config(db: Session, settings: Settings) -> dict[str, Any]:
     runtime = get_effective_ai_runtime_settings(db, settings)
     return {
@@ -640,14 +707,15 @@ async def enqueue_gpt_image_job(
     store_id: int = Form(...),
     variant_id: str = Form(...),
     variant_index: int = Form(...),
-    selectedModelId: str = Form(...),
-    selectedModelImageUrl: str = Form(...),
-    selectedModelGender: str = Form(...),
-    selectedModelBodyType: str = Form(...),
+    selectedModelId: str | None = Form(default=None),
+    selectedModelImageUrl: str | None = Form(default=None),
+    selectedModelGender: str | None = Form(default=None),
+    selectedModelBodyType: str | None = Form(default=None),
     style: str = Form(...),
     quantity: int = Form(...),
     productFrontImage: UploadFile = File(...),
     productBackImage: UploadFile | None = File(default=None),
+    autoGenerateModel: bool = Form(default=False),
     model: str | None = Form(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -667,6 +735,10 @@ async def enqueue_gpt_image_job(
     _enforce_generation_budget(db, locked_user, quantity, estimated_cost)
     _enforce_credit_balance(db, locked_user, credit_cost)
 
+    auto_model_generation = bool(autoGenerateModel or selectedModelId == "auto_russian_model")
+    if not auto_model_generation and (not selectedModelId or selectedModelId == "none"):
+        raise AppError("missing_model_reference", "Please select a real model reference before generating catalog images.", 400)
+
     _validate_image_upload(productFrontImage)
     if productBackImage:
         _validate_image_upload(productBackImage)
@@ -676,10 +748,11 @@ async def enqueue_gpt_image_job(
 
     # Resolve model reference image
     model_bytes = None
-    model_p = resolve_model_image_path(selectedModelId)
-    if model_p and model_p.exists():
-        with open(model_p, "rb") as f:
-            model_bytes = f.read()
+    if not auto_model_generation and selectedModelId and selectedModelId not in {"none", "auto_russian_model"}:
+        model_p = resolve_model_image_path(selectedModelId)
+        if model_p and model_p.exists():
+            with open(model_p, "rb") as f:
+                model_bytes = f.read()
 
     analysis = _draft_analysis(draft)
     garment_json = _draft_garment_json(draft)
@@ -702,16 +775,31 @@ async def enqueue_gpt_image_job(
         draft.garment_json = garment_json
         db.commit()
 
+    if auto_model_generation:
+        resolved_model = select_auto_model_template(db, garment_json, analysis, selectedModelGender)
+        if resolved_model:
+            selectedModelId = resolved_model.id
+            selectedModelImageUrl = resolved_model.reference_image_url or (resolved_model.poses or {}).get("front") or resolved_model.thumbnail_url or ""
+            selectedModelGender = resolved_model.gender
+            selectedModelBodyType = resolved_model.body_type
+            auto_model_generation = False
+
+            model_p = resolve_model_image_path(selectedModelId)
+            if model_p and model_p.exists():
+                with open(model_p, "rb") as f:
+                    model_bytes = f.read()
+
     metadata = {
         "title": draft.vendor_code or "garment",
         "category": "gpt-image",
-        "model_id": selectedModelId,
-        "selected_model_image_url": selectedModelImageUrl,
-        "selected_model_gender": selectedModelGender,
-        "selected_model_body_type": selectedModelBodyType,
+        "model_id": "auto_russian_model" if auto_model_generation else (selectedModelId or "none"),
+        "selected_model_image_url": "" if auto_model_generation else (selectedModelImageUrl or ""),
+        "selected_model_gender": selectedModelGender or analysis.get("gender") or "female",
+        "selected_model_body_type": selectedModelBodyType or "",
         "style": style,
         "garment_json": garment_json,
         "runtime_config": runtime_config,
+        "auto_model_generation": auto_model_generation,
         "output_type": "catalog_bundle",
     }
     metadata["model"] = model or runtime_config["default_image_model"]
@@ -729,12 +817,13 @@ async def enqueue_gpt_image_job(
         back_image=back_bytes,
         model_image=model_bytes,
         job_type="gpt_image",
-        model_id=selectedModelId,
+        model_id="auto_russian_model" if auto_model_generation else (selectedModelId or "none"),
         queue_name=queue_name_for_plan(user.plan_type),
         credit_cost=credit_cost,
         db=db,
     )
     return ImageGenerationJobResponse.model_validate(job)
+
 
 
 @router.get("/drafts/{draft_id}/gpt-image/jobs/{job_id}", response_model=ImageGenerationJobResponse)
@@ -829,6 +918,20 @@ async def enqueue_gpt_image_openai_job(
         draft.analysis = analysis_copy
         draft.garment_json = garment_json
         db.commit()
+
+    if auto_model_generation:
+        resolved_model = select_auto_model_template(db, garment_json, analysis, selectedModelGender)
+        if resolved_model:
+            selectedModelId = resolved_model.id
+            selectedModelImageUrl = resolved_model.reference_image_url or (resolved_model.poses or {}).get("front") or resolved_model.thumbnail_url or ""
+            selectedModelGender = resolved_model.gender
+            selectedModelBodyType = resolved_model.body_type
+            auto_model_generation = False
+
+            model_p = resolve_model_image_path(selectedModelId)
+            if model_p and model_p.exists():
+                with open(model_p, "rb") as f:
+                    model_bytes = f.read()
 
     metadata = {
         "title": draft.vendor_code or "garment",

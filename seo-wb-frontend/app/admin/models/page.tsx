@@ -25,6 +25,7 @@ type ModelTemplate = {
 const initialForm = {
   name: "",
   garment_type: "",
+  gender: "female",
 };
 
 const slugify = (text: string) => {
@@ -133,6 +134,9 @@ function ModelCard({ model, onEdit, onDelete }: { model: ModelTemplate; onEdit: 
           <p className="mt-1 text-sm text-stone-500">
             Loại: <span className="font-medium text-stone-700">{getGarmentTypeLabel(model.garment_type)}</span>
           </p>
+          <p className="mt-0.5 text-sm text-stone-500">
+            Giới tính: <span className="font-medium text-stone-700">{model.gender === "male" ? "Nam" : "Nữ"}</span>
+          </p>
         </div>
       </div>
       <div className="mt-4 flex gap-2 justify-end">
@@ -178,6 +182,7 @@ export default function AdminModelsPage() {
     setForm({
       name: model.name,
       garment_type: model.garment_type || "",
+      gender: model.gender || "female",
     });
     setEditingPoses(model.poses || {});
     setReferenceImages([]);
@@ -205,7 +210,7 @@ export default function AdminModelsPage() {
     body.set("payload_json", JSON.stringify({
       id: slug,
       name: form.name,
-      gender: "female",
+      gender: form.gender || "female",
       body_type: "average",
       height_cm: null,
       weight_kg: null,
@@ -277,6 +282,18 @@ export default function AdminModelsPage() {
                 <option value="shirt">Áo (Shirt/Top)</option>
                 <option value="shoes">Giày (Shoes)</option>
                 <option value="suit">Bộ quần áo (Suit/Outfit)</option>
+              </select>
+            </label>
+            
+            <label className="block text-sm font-medium text-stone-700">
+              Giới tính
+              <select
+                className="mt-1 block w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm"
+                value={form.gender}
+                onChange={(e) => setForm((s) => ({ ...s, gender: e.target.value }))}
+              >
+                <option value="female">Nữ (Female)</option>
+                <option value="male">Nam (Male)</option>
               </select>
             </label>
             

@@ -93,6 +93,26 @@ export function getEnglishCategoryKey(category: string): string {
   return "garment";
 }
 
+export function getModelGarmentType(category: string): string | null {
+  const cat = (category || "").toLowerCase().trim();
+  if (cat.includes("брюки") || cat.includes("штаны") || cat.includes("леггинсы") || cat.includes("джоггеры") || cat.includes("pants") || cat.includes("джинсы") || cat.includes("jeans") || cat.includes("шорты") || cat.includes("shorts")) {
+    return "pants";
+  }
+  if (cat.includes("юбк") || cat.includes("skirt") || cat.includes("плать") || cat.includes("сарафан") || cat.includes("dress")) {
+    return "dress";
+  }
+  if (cat.includes("рубаш") || cat.includes("блуз") || cat.includes("shirt") || cat.includes("футболк") || cat.includes("майк") || cat.includes("топ") || cat.includes("t-shirt") || cat.includes("худи") || cat.includes("свитшот") || cat.includes("толстовк") || cat.includes("джемпер") || cat.includes("свитер") || cat.includes("пуловер") || cat.includes("кардиган") || cat.includes("hoodie") || cat.includes("куртк") || cat.includes("пальто") || cat.includes("пиджак") || cat.includes("жилет") || cat.includes("ветровк") || cat.includes("бомбер") || cat.includes("jacket")) {
+    return "shirt";
+  }
+  if (cat.includes("костюм") || cat.includes("комбинезон") || cat.includes("комплект") || cat.includes("set") || cat.includes("suit")) {
+    return "suit";
+  }
+  if (cat.includes("обувь") || cat.includes("shoes") || cat.includes("ботин") || cat.includes("сапог") || cat.includes("кроссов")) {
+    return "shoes";
+  }
+  return null;
+}
+
 export interface ImageGenerationStatus {
   id?: string;
   status: string;
@@ -263,6 +283,12 @@ export function MediaGallery({
   const [models, setModels] = useState<RuntimeModelTemplate[]>([]);
   const [modelsLoadError, setModelsLoadError] = useState("");
 
+  const mappedGarmentType = getModelGarmentType(productCategory);
+  const displayModels = mappedGarmentType
+    ? models.filter((m) => m.garmentType === mappedGarmentType || m.garmentType === "full_body")
+    : models;
+  const modelsToRender = displayModels.length > 0 ? displayModels : models;
+
   const [garmentJson, setGarmentJson] = useState<GarmentJsonPayload | null>(null);
   const [isFetchingGarment, setIsFetchingGarment] = useState(false);
   const [isAnalyzingGarment, setIsAnalyzingGarment] = useState(false);
@@ -303,6 +329,15 @@ export function MediaGallery({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (isModalOpen && modelsToRender.length > 0) {
+      const isSelectedValid = modelsToRender.some((m) => m.id === selectedModelId);
+      if (!isSelectedValid) {
+        setSelectedModelId(modelsToRender[0].id);
+      }
+    }
+  }, [isModalOpen, modelsToRender, selectedModelId]);
 
   useEffect(() => {
     if (!isModalOpen || !draftId) return;
@@ -994,7 +1029,7 @@ export function MediaGallery({
                       )}
                       <ModelSelector
                         selectedModelId={selectedModelId}
-                        models={models}
+                        models={modelsToRender}
                         onSelectModel={(model) => {
                           setSelectedModelId(model.id);
                           setValidationError("");
@@ -1094,7 +1129,7 @@ export function MediaGallery({
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
                     <div className="font-semibold text-zinc-900">Pose Bundle Preview</div>
                     <div className="mt-1 leading-relaxed">
-                      {quantity === 3 && "Front, Lifestyle, Detail"}
+                      {quantity === 3 && "Front, Side, Back"}
                       {quantity === 6 && (backImage 
                         ? "Front, Side, Back, Lifestyle, Detail, Banner"
                         : "Front, Side, Lifestyle, Detail, Extra Detail, Banner")}
