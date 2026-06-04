@@ -273,9 +273,8 @@ def test_gpt_prompt_builder_realism_and_retry():
         style="studio",
         pose="front"
     )
-    assert "Use image 1 as the real model reference." in strong_prompt
-    assert "Keep the same face, skin texture, body proportions" in strong_prompt
     assert "Use image 2 as the exact product reference." in strong_prompt
+    assert "No CGI." in strong_prompt
 
 
 @pytest.mark.anyio

@@ -129,6 +129,7 @@ class GarmentValidator:
             ) from exc
 
         # ENFORCEMENT RULES:
+        is_detail = pose in {"detail", "fabric_detail", "logo_detail", "extra_detail", "product_detail"}
         detected_area = val_res.get("detected_garment_area", "").lower().strip()
         detected_pose = val_res.get("detected_pose", "").lower().strip()
         failed_fields = list(val_res.get("failed_fields", []))
@@ -137,7 +138,7 @@ class GarmentValidator:
         realism_issues = list(val_res.get("realism_issues", []))
 
         # Check for strict garment area mismatch
-        if expected_area and detected_area != expected_area:
+        if expected_area and detected_area != expected_area and not is_detail:
             if "garment_area" not in failed_fields:
                 failed_fields.append("garment_area")
             msg = f"Garment area mismatch: expected {expected_area}, detected {detected_area}"
@@ -146,7 +147,7 @@ class GarmentValidator:
 
         # Check category match
         detected_category = val_res.get("detected_category", "").lower().strip()
-        if expected_category and expected_category not in detected_category and detected_category not in expected_category:
+        if expected_category and expected_category not in detected_category and detected_category not in expected_category and not is_detail:
             # Let's perform basic Russian/English substring matching checks
             # e.g., if expected "юбка" and detected "skirt" or vice versa
             is_compatible = False
@@ -210,7 +211,7 @@ class GarmentValidator:
                 missing_details.append("rhinestones/crystals/studs")
 
         expected_pose = (pose or "").lower().strip()
-        pose_mismatch = bool(expected_pose and detected_pose and expected_pose != detected_pose)
+        pose_mismatch = bool(expected_pose and detected_pose and expected_pose != detected_pose) and not is_detail
 
         source_image_bytes = source_back_image_bytes if pose == "back" and source_back_image_bytes else source_front_image_bytes
         color_metrics = {
@@ -255,6 +256,11 @@ class GarmentValidator:
         # Realism checks
         realism_score = float(val_res.get("realism_score", 100))
         effective_realism_threshold = max(0, min(100, int(realism_threshold if realism_threshold is not None else 80)))
+        
+        if is_detail:
+            realism_issues = []
+            realism_score = 100
+
         realism_artifact_issue = realism_score < max(55, effective_realism_threshold - 20)
         moderate_realism_issue = realism_score < effective_realism_threshold and not realism_artifact_issue
         realism_notes: list[str] = []
@@ -272,6 +278,9 @@ class GarmentValidator:
         garment_preservation = float(val_res.get("garment_preservation_score", 1.0))
         critical_details = float(val_res.get("critical_details_score", 1.0))
         pose_accuracy = float(val_res.get("pose_accuracy_score", 1.0))
+        if is_detail:
+            pose_accuracy = 1.0
+            failed_fields = [f for f in failed_fields if f not in {"garment_area", "category", "silhouette", "length"}]
 
         wrong_garment_area = "garment_area" in failed_fields
         wrong_garment_type = "category" in failed_fields
@@ -409,7 +418,16 @@ class GarmentValidator:
 
         # Visibility-aware instructions
         pose_instruction = ""
-        if pose:
+        is_detail = pose in {"detail", "fabric_detail", "logo_detail", "extra_detail", "product_detail"}
+        if is_detail:
+            pose_instruction = (
+                f"The generated image is a product-only close-up detail shot ('{pose}').\n"
+                "- There is NO model, face, or body in the image.\n"
+                "- DO NOT validate or require garment_area on body, pose accuracy, model realism, face, or body proportions.\n"
+                "- Set detected_pose to match the expected pose exactly, and pose_accuracy_score to 1.0.\n"
+                "- Evaluate ONLY the product attributes visible in the close-up (color, material, texture, logo/text, embroidery, rhinestones, distressing, seams, pockets, closures).\n"
+            )
+        elif pose:
             pose_instruction = f"The generated image depicts the model in the '{pose}' pose.\n"
             if pose in {"front", "side_45", "walking", "hand_on_hip", "sitting"}:
                 pose_instruction += (

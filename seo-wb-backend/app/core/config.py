@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_card_model: str | None = None
     openai_image_model: str = "gpt-image-2"
-    fal_key: str | None = None
-    fal_gpt_image_model: str = "gpt-image-2"
+    fal_key: str | None = None  # Deprecated: Fal.ai integration has been removed
+    fal_gpt_image_model: str = "gpt-image-2"  # Deprecated: Fal.ai integration has been removed
     redis_url: str | None = None
     redis_host: str | None = None
     redis_user: str | None = None

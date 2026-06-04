@@ -30,6 +30,8 @@ async def lifespan(_: FastAPI):
     init_db()
     with SessionLocal() as db:
         ensure_subscription_plan_seeds(db)
+        from app.services.admin_runtime import ensure_builtin_model_seeds
+        ensure_builtin_model_seeds(db)
     try:
         yield
     finally:

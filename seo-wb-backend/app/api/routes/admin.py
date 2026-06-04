@@ -407,6 +407,7 @@ async def create_model(
         model.body_type = payload.body_type
         model.height_cm = payload.height_cm
         model.weight_kg = payload.weight_kg
+        model.garment_type = payload.garment_type
         model.is_ai_generated = payload.is_ai_generated
         model.status = payload.status
         model.quality_status = _normalize_quality_status(payload.quality_status)
@@ -455,6 +456,7 @@ async def update_model(
     model.body_type = payload.body_type
     model.height_cm = payload.height_cm
     model.weight_kg = payload.weight_kg
+    model.garment_type = payload.garment_type
     model.is_ai_generated = payload.is_ai_generated
     model.status = payload.status
     model.quality_status = _normalize_quality_status(payload.quality_status)

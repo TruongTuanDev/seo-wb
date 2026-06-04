@@ -55,10 +55,10 @@ class ProductImageGenerator:
         credit_cost: int = 0,
         db: Session | None = None,
     ) -> dict[str, Any]:
-        if job_type in {"openai", "gpt_image_openai"} and not self._settings.openai_api_key:
+        if job_type == "try_on":
+            raise AppError("fal_ai_not_supported", "Virtual Try-On is not supported because Fal.ai integration has been removed.", 400)
+        elif job_type in {"openai", "gpt_image_openai", "gpt_image"} and not self._settings.openai_api_key:
             raise AppError("missing_openai_key", "OPENAI_API_KEY is missing.", 500)
-        elif job_type in {"try_on", "gpt_image"} and not self._settings.fal_key:
-            raise AppError("missing_fal_key", "FAL_KEY is missing.", 500)
 
         lock_key = self._lock_key(user_id, draft_id, variant_id)
         locked = await self._redis.set(lock_key, "1", nx=True, ex=self._settings.image_generation_lock_ttl_seconds)
@@ -576,6 +576,7 @@ class ProductImageGenerator:
             "seller_warning": state.get("seller_warning"),
             "final_validation_status": state.get("final_validation_status"),
             "validation_summary": state.get("validation_summary"),
+            "openai_calls_metadata": state.get("openai_calls_metadata"),
         }
 
     @staticmethod
@@ -642,6 +643,7 @@ class ProductImageGenerator:
             "seller_warning": state.get("seller_warning"),
             "final_validation_status": state.get("final_validation_status"),
             "validation_summary": state.get("validation_summary"),
+            "openai_calls_metadata": state.get("openai_calls_metadata"),
         }
         prompt = images[0].get("prompt") if images else job.prompt
         primary_image = images[0] if images else {}

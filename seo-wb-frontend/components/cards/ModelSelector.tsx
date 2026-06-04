@@ -2,12 +2,21 @@
 
 import React from "react";
 import type { RuntimeModelTemplate } from "@/lib/modelTemplates";
+import { API_BASE } from "@/lib/api";
 
 interface ModelSelectorProps {
   selectedModelId: string;
   models: RuntimeModelTemplate[];
   onSelectModel: (model: RuntimeModelTemplate) => void;
 }
+
+const getImageUrl = (url: string | null | undefined) => {
+  if (!url) return "";
+  if (url.startsWith("/storage")) {
+    return `${API_BASE.replace("/api/v1", "")}${url}`;
+  }
+  return url; // Static public assets like /models/... loaded relatively from frontend origin
+};
 
 export function ModelSelector({
   selectedModelId,
@@ -44,7 +53,7 @@ export function ModelSelector({
                 <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg bg-zinc-50 border border-zinc-100">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={model.frontImageUrl}
+                    src={getImageUrl(model.frontImageUrl)}
                     alt={model.name}
                     className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                   />
@@ -73,12 +82,6 @@ export function ModelSelector({
                   <div className="text-xs font-semibold text-zinc-950">
                     {model.name}
                   </div>
-                  <div className="mt-0.5 text-[10px] font-medium text-zinc-600">
-                    {model.gender} • {model.bodyType}
-                  </div>
-                  <div className="text-[9px] text-zinc-400">
-                    {model.height}cm • {model.weight}kg
-                  </div>
                 </div>
               </button>
             );
@@ -88,3 +91,4 @@ export function ModelSelector({
     </div>
   );
 }
+

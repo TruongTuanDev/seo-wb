@@ -100,6 +100,7 @@ def test_admin_ai_settings_default_and_update_validation_failure_behavior(client
     assert response.status_code == 200
     assert response.json()["validation_failure_behavior"] == "warn"
 
+    csrf_token = login.cookies.get("seller_wb_admin_csrf") or ""
     update = test_client.put(
         "/api/v1/admin/settings/ai",
         json={
@@ -113,6 +114,7 @@ def test_admin_ai_settings_default_and_update_validation_failure_behavior(client
             "validation_failure_behavior": "block",
             "allow_legacy_vton": True,
         },
+        headers={"x-csrf-token": csrf_token},
     )
     assert update.status_code == 200
     assert update.json()["validation_failure_behavior"] == "block"

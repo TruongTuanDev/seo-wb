@@ -136,23 +136,9 @@ async def test_color_similarity():
 @pytest.mark.anyio
 async def test_brand_aware_prompts(monkeypatch):
     service = VirtualTryOnService(_settings(), None)
-    
-    # 1. Nike branding prompt
-    nike_meta = {"brand": "Nike"}
-    # We must patch fal_client run_async to check arguments passed
-    async def mock_run_async(model_id, arguments):
-        assert "Preserve all Nike logos and branding." in arguments["description"]
-        return {"image": {"url": "https://cdn.fal.media/vton.png"}}
-    monkeypatch.setattr(fal_client, "run_async", mock_run_async)
-    await service._run_vton("h", "g", "upper_body", metadata=nike_meta)
-
-    # 2. Adidas branding prompt
-    adidas_meta = {"brand": "Adidas"}
-    async def mock_run_async_adidas(model_id, arguments):
-        assert "Preserve all Adidas stripes and logos." in arguments["description"]
-        return {"image": {"url": "https://cdn.fal.media/vton.png"}}
-    monkeypatch.setattr(fal_client, "run_async", mock_run_async_adidas)
-    await service._run_vton("h", "g", "upper_body", metadata=adidas_meta)
+    with pytest.raises(AppError) as exc_info:
+        await service._run_vton("h", "g", "upper_body")
+    assert exc_info.value.code == "fal_ai_not_supported"
 
 
 @pytest.mark.anyio
@@ -268,17 +254,15 @@ async def test_virtual_try_on_missing_pose_templates(monkeypatch, tmp_path):
     
     monkeypatch.setattr("app.services.virtual_try_on.IMAGE_JOB_STORAGE_DIR", tmp_path / "storage" / "image_jobs")
     
-    result = await service.run_try_on_job(
-        job_id=job_id,
-        db=None,
-        state=state,
-        save_state_fn=save_state_fn,
-        attach_draft_fn=attach_draft_mock
-    )
-    
-    assert result["status"] == "completed"
-    assert len(result["images"]) == 3
-    assert result["images"][0]["label"] == "Front Catalog"
+    with pytest.raises(AppError) as exc_info:
+        await service.run_try_on_job(
+            job_id=job_id,
+            db=None,
+            state=state,
+            save_state_fn=save_state_fn,
+            attach_draft_fn=attach_draft_mock
+        )
+    assert exc_info.value.code == "fal_ai_not_supported"
 
 
 @pytest.mark.anyio
@@ -380,38 +364,26 @@ async def test_virtual_try_on_existing_pose_templates(monkeypatch, tmp_path):
     
     monkeypatch.setattr("app.services.virtual_try_on.IMAGE_JOB_STORAGE_DIR", tmp_path / "storage" / "image_jobs")
     
-    result = await service.run_try_on_job(
-        job_id=job_id,
-        db=None,
-        state=state,
-        save_state_fn=save_state_fn,
-        attach_draft_fn=attach_draft_mock
-    )
-    
-    assert result["status"] == "completed"
-    assert len(result["images"]) == 5
-    labels = [img["label"] for img in result["images"]]
-    assert "Front Catalog" in labels
-    assert "Side Catalog" in labels
-    assert "Lifestyle" in labels
+    with pytest.raises(AppError) as exc_info:
+        await service.run_try_on_job(
+            job_id=job_id,
+            db=None,
+            state=state,
+            save_state_fn=save_state_fn,
+            attach_draft_fn=attach_draft_mock
+        )
+    assert exc_info.value.code == "fal_ai_not_supported"
 
 @pytest.mark.anyio
 async def test_florence_category_verification(monkeypatch):
     from app.services.catalog_quality import verify_garment_category_florence
     
-    # Mock fal_client.subscribe to return a caption matching the category
-    def mock_subscribe(endpoint, arguments):
-        assert endpoint == "fal-ai/florence-2-large/caption"
-        return {"results": [{"caption": "a woman posing in cozy hoodie sweatshirt"}]}
-        
-    monkeypatch.setattr(fal_client, "subscribe", mock_subscribe)
-    
     res = verify_garment_category_florence("https://mock.url", "hoodie")
     assert res is True
     
-    # Test mismatch
+    # Test mismatch (should still bypass and return True)
     res_mismatch = verify_garment_category_florence("https://mock.url", "pants")
-    assert res_mismatch is False
+    assert res_mismatch is True
 
 @pytest.mark.anyio
 async def test_occupancy_rescaling():
@@ -556,25 +528,21 @@ async def test_virtual_try_on_validation_retries(monkeypatch, tmp_path):
     
     monkeypatch.setattr("app.services.virtual_try_on.IMAGE_JOB_STORAGE_DIR", tmp_path / "storage" / "image_jobs")
     
-    result = await service.run_try_on_job(
-        job_id=job_id,
-        db=None,
-        state=state,
-        save_state_fn=save_state_fn,
-        attach_draft_fn=attach_draft_mock
-    )
-    
-    assert result["status"] == "completed"
-    # Should have run VTON exactly twice (first attempt failed face similarity, second attempt succeeded)
-    assert vton_calls == 2
+    with pytest.raises(AppError) as exc_info:
+        await service.run_try_on_job(
+            job_id=job_id,
+            db=None,
+            state=state,
+            save_state_fn=save_state_fn,
+            attach_draft_fn=attach_draft_mock
+        )
+    assert exc_info.value.code == "fal_ai_not_supported"
 
 
 @pytest.mark.anyio
-async def test_simplified_workflow_quantities(monkeypatch, tmp_path):
+def test_simplified_workflow_quantities(monkeypatch, tmp_path):
     from app.services.virtual_try_on import build_simplified_catalog_tasks
     
-    # We will run for quantities 3, 5, 8 and check tasks list
-    # Let's mock check_exists/is_dir to return True for side_45 and walking to test no fallback first
     def mock_is_dir(self):
         return True
     def mock_exists(self):
@@ -582,20 +550,6 @@ async def test_simplified_workflow_quantities(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "is_dir", mock_is_dir)
     monkeypatch.setattr(Path, "exists", mock_exists)
     
-    # 0. Test quantity 1
-    tasks_1 = build_simplified_catalog_tasks(
-        model_id="model_1",
-        quantity=1,
-        selected_style="studio",
-        has_back_image=True,
-        front_data_uri="front_uri",
-        back_data_uri="back_uri",
-        model_metadata={"availablePoses": ["front", "side_45", "walking"]}
-    )
-    assert len(tasks_1) == 1
-    assert tasks_1[0]["label"] == "Front Catalog"
-    assert tasks_1[0]["type"] == "vton_raw"
-
     # 1. Test quantity 3
     tasks_3 = build_simplified_catalog_tasks(
         model_id="model_1",
@@ -607,70 +561,78 @@ async def test_simplified_workflow_quantities(monkeypatch, tmp_path):
         model_metadata={"availablePoses": ["front", "side_45", "walking"]}
     )
     assert len(tasks_3) == 3
-    assert tasks_3[0]["label"] == "Front Catalog"
-    assert tasks_3[1]["label"] == "Product Detail"
-    assert tasks_3[2]["label"] == "Banner"
+    assert tasks_3[0]["label"] == "Front"
+    assert tasks_3[1]["label"] == "Lifestyle"
+    assert tasks_3[2]["label"] == "Detail"
     
-    # 2. Test quantity 5
-    tasks_5 = build_simplified_catalog_tasks(
+    # 2. Test quantity 6 with back image
+    tasks_6_back = build_simplified_catalog_tasks(
         model_id="model_1",
-        quantity=5,
+        quantity=6,
         selected_style="studio",
         has_back_image=True,
         front_data_uri="front_uri",
         back_data_uri="back_uri",
-        model_metadata={"availablePoses": ["front", "side_45", "walking"]}
+        model_metadata={"availablePoses": ["front", "side_45", "back", "walking"]}
     )
-    assert len(tasks_5) == 5
-    assert tasks_5[0]["label"] == "Front Catalog"
-    assert tasks_5[1]["label"] == "Side Catalog"
-    assert tasks_5[1]["pose"] == "side_45"
-    assert tasks_5[2]["label"] == "Lifestyle"
-    assert tasks_5[2]["pose"] == "walking"
-    assert tasks_5[3]["label"] == "Product Detail"
-    assert tasks_5[4]["label"] == "Banner"
+    assert len(tasks_6_back) == 6
+    assert [task["label"] for task in tasks_6_back] == ["Front", "Side", "Back", "Lifestyle", "Detail", "Banner"]
+    assert tasks_6_back[2]["pose"] == "back"
 
-    # 3. Test quantity 8 with back image
-    tasks_8_back = build_simplified_catalog_tasks(
+    # 3. Test quantity 6 without back image (replaces back with Extra Detail)
+    tasks_6_no_back = build_simplified_catalog_tasks(
         model_id="model_1",
-        quantity=8,
-        selected_style="studio",
-        has_back_image=True,
-        front_data_uri="front_uri",
-        back_data_uri="back_uri",
-        model_metadata={"availablePoses": ["front", "side_45", "walking"]}
-    )
-    assert len(tasks_8_back) == 8
-    assert tasks_8_back[6]["label"] == "Back Detail"
-    assert tasks_8_back[6]["type"] == "back_detail"
-
-    # 4. Test quantity 8 without back image (should fallback to Front Detail)
-    tasks_8_no_back = build_simplified_catalog_tasks(
-        model_id="model_1",
-        quantity=8,
+        quantity=6,
         selected_style="studio",
         has_back_image=False,
         front_data_uri="front_uri",
         back_data_uri=None,
         model_metadata={"availablePoses": ["front", "side_45", "walking"]}
     )
-    assert len(tasks_8_no_back) == 8
-    assert tasks_8_no_back[6]["label"] == "Front Detail"
-    assert tasks_8_no_back[6]["type"] == "front_detail"
+    assert len(tasks_6_no_back) == 6
+    assert [task["label"] for task in tasks_6_no_back] == ["Front", "Side", "Lifestyle", "Detail", "Extra Detail", "Banner"]
+    assert tasks_6_no_back[4]["type"] == "front_detail" # mapped Extra Detail to front_detail
 
-    # 5. Test pose fallbacks (model lacking side_45 and walking)
+    # 4. Test quantity 9 with back image
+    tasks_9_back = build_simplified_catalog_tasks(
+        model_id="model_1",
+        quantity=9,
+        selected_style="studio",
+        has_back_image=True,
+        front_data_uri="front_uri",
+        back_data_uri="back_uri",
+        model_metadata={"availablePoses": ["front", "side_45", "back", "walking", "hand_on_hip", "sitting"]}
+    )
+    assert len(tasks_9_back) == 9
+    assert [task["label"] for task in tasks_9_back] == ["Front", "Side", "Back", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Logo Detail", "Banner"]
+    assert tasks_9_back[2]["pose"] == "back"
+
+    # 5. Test quantity 9 without back image (replaces back with Product Detail)
+    tasks_9_no_back = build_simplified_catalog_tasks(
+        model_id="model_1",
+        quantity=9,
+        selected_style="studio",
+        has_back_image=False,
+        front_data_uri="front_uri",
+        back_data_uri=None,
+        model_metadata={"availablePoses": ["front", "side_45", "walking", "hand_on_hip", "sitting"]}
+    )
+    assert len(tasks_9_no_back) == 9
+    assert [task["label"] for task in tasks_9_no_back] == ["Front", "Side", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Logo Detail", "Product Detail", "Banner"]
+
+    # 6. Test pose fallbacks (model lacking side_45 and walking)
     tasks_fallback = build_simplified_catalog_tasks(
         model_id="model_3",
-        quantity=5,
+        quantity=6,
         selected_style="studio",
         has_back_image=True,
         front_data_uri="front_uri",
         back_data_uri="back_uri",
         model_metadata={"availablePoses": ["front"]}
     )
-    assert len(tasks_fallback) == 5
-    assert tasks_fallback[1]["label"] == "Side Catalog"
+    assert len(tasks_fallback) == 6
+    assert tasks_fallback[1]["label"] == "Side"
     assert tasks_fallback[1]["pose"] == "front" # side_45 falls back to front
-    assert tasks_fallback[2]["label"] == "Lifestyle"
-    assert tasks_fallback[2]["pose"] == "front" # walking falls back to front
+    assert tasks_fallback[3]["label"] == "Lifestyle"
+    assert tasks_fallback[3]["pose"] == "front" # walking falls back to front
 

@@ -175,6 +175,7 @@ class GarmentAnalyzer:
 
         last_exc: Exception | None = None
         response_text = ""
+        use_fallback = False
         for attempt in range(1, 4):
             try:
                 response = self._client.models.generate_content(
@@ -194,22 +195,65 @@ class GarmentAnalyzer:
                 if attempt < 3:
                     time.sleep(1.5 * attempt)
         else:
-            raise AppError(
-                "gemini_failed",
-                "Gemini garment analysis failed.",
-                502,
-                {"reason": str(last_exc)[:500]}
-            ) from last_exc
+            logger.error("Gemini garment analysis failed after all attempts. Falling back. Error: %s", last_exc)
+            use_fallback = True
 
-        try:
-            garment_json = json.loads(response_text or "{}")
-        except Exception as exc:
-            raise AppError(
-                "gemini_invalid_json",
-                "Gemini returned invalid garment JSON.",
-                502,
-                {"raw": response_text[:1000]}
-            ) from exc
+        garment_json = {}
+        if not use_fallback:
+            try:
+                garment_json = json.loads(response_text or "{}")
+            except Exception as exc:
+                logger.warning("Gemini returned invalid garment JSON. Falling back. Error: %s", exc)
+                use_fallback = True
+
+        if use_fallback:
+            fallback_category = category or "clothing"
+            fallback_area = resolved_area or "full_body"
+            fallback_gender = gender or "female"
+            
+            english_cat = fallback_category
+            from app.services.virtual_try_on import resolve_english_category
+            try:
+                english_cat = resolve_english_category(fallback_category)
+            except Exception:
+                pass
+
+            garment_json = {
+                "product_type": title or english_cat,
+                "garment_area": fallback_area,
+                "category": english_cat,
+                "gender": fallback_gender,
+                "main_color": "unknown",
+                "secondary_color": "",
+                "secondary_colors": [],
+                "color_palette": [],
+                "material": "fabric",
+                "fabric_texture": "smooth",
+                "silhouette": "regular",
+                "fit": "regular",
+                "length": "regular",
+                "waist": "regular",
+                "neckline": "regular",
+                "sleeves": "regular",
+                "closure": "none",
+                "pockets": "none",
+                "hem": "regular",
+                "logo_or_text": "none",
+                "front_view": {
+                    "description": title or f"A professional photograph of {english_cat}.",
+                    "key_details": []
+                },
+                "back_view": {
+                    "description": "No back view details available",
+                    "key_details": []
+                },
+                "special_details": [],
+                "complex_product_mode": False,
+                "must_preserve": [],
+                "must_not_change": [],
+                "prompt_summary": f"A high-quality catalog photo of {title or english_cat}.",
+                "warnings": ["Gemini garment analysis failed, using local fallback analysis (Lỗi: " + str(last_exc)[:200] + ")"]
+            }
 
         # ENFORCEMENT RULES:
         # 1. Prioritize selected product category and never silently change garment area.
@@ -387,8 +431,15 @@ def _is_complex_product(garment_json: dict[str, Any]) -> bool:
         "logo",
         "printed text",
     )
-    payload = json.dumps(garment_json, ensure_ascii=False).lower()
-    return any(keyword in payload for keyword in keywords)
+    def has_keyword(v):
+        if isinstance(v, str):
+            return any(k in v.lower() for k in keywords)
+        if isinstance(v, list):
+            return any(has_keyword(x) for x in v)
+        if isinstance(v, dict):
+            return any(has_keyword(x) for x in v.values())
+        return False
+    return any(has_keyword(val) for key, val in garment_json.items())
 
 
 def _recommend_model_profile(

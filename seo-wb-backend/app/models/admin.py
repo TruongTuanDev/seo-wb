@@ -16,6 +16,7 @@ class ModelTemplate(Base):
     body_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     height_cm: Mapped[int | None] = mapped_column(Integer, nullable=True)
     weight_kg: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    garment_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_ai_generated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False, index=True)
     quality_status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False, index=True)

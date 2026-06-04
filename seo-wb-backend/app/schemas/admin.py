@@ -94,6 +94,7 @@ class ModelTemplateResponse(BaseModel):
     body_type: str
     height_cm: int | None
     weight_kg: int | None
+    garment_type: str | None = None
     is_ai_generated: bool
     status: str
     quality_status: str
@@ -111,6 +112,7 @@ class ModelTemplateUpsertRequest(BaseModel):
     body_type: str = Field(min_length=1, max_length=64)
     height_cm: int | None = None
     weight_kg: int | None = None
+    garment_type: str | None = None
     is_ai_generated: bool = False
     status: str = "active"
     quality_status: str = "draft"
