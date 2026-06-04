@@ -205,9 +205,12 @@ def create_user(
         user.status = _normalize_status(payload.status)
         apply_plan_defaults(user, normalize_plan_type(payload.plan_type))
         user.monthly_quota = max(0, payload.monthly_quota or user.monthly_quota)
+        if payload.monthly_card_quota is not None:
+            user.monthly_card_quota = max(0, payload.monthly_card_quota)
         if payload.monthly_cost_limit is not None:
             user.monthly_cost_limit = max(0.0, payload.monthly_cost_limit)
         user.used_quota = 0
+        user.used_card_quota = 0
         user.used_cost = 0.0
     else:
         user = User(
@@ -219,8 +222,11 @@ def create_user(
         )
         apply_plan_defaults(user, normalize_plan_type(payload.plan_type))
         user.monthly_quota = max(0, payload.monthly_quota or user.monthly_quota)
+        if payload.monthly_card_quota is not None:
+            user.monthly_card_quota = max(0, payload.monthly_card_quota)
         if payload.monthly_cost_limit is not None:
             user.monthly_cost_limit = max(0.0, payload.monthly_cost_limit)
+        user.used_card_quota = 0
         db.add(user)
     db.commit()
     db.refresh(user)
@@ -278,6 +284,10 @@ def update_user(
         user.monthly_quota = max(0, payload.monthly_quota)
     if payload.used_quota is not None:
         user.used_quota = max(0, payload.used_quota)
+    if payload.monthly_card_quota is not None:
+        user.monthly_card_quota = max(0, payload.monthly_card_quota)
+    if payload.used_card_quota is not None:
+        user.used_card_quota = max(0, payload.used_card_quota)
     if payload.monthly_cost_limit is not None:
         user.monthly_cost_limit = max(0.0, payload.monthly_cost_limit)
     if payload.used_cost is not None:
@@ -673,6 +683,8 @@ def _user_response(user: User) -> AdminUserResponse:
         priority_queue=plan.priority_queue,
         monthly_quota=user.monthly_quota,
         used_quota=user.used_quota,
+        monthly_card_quota=user.monthly_card_quota,
+        used_card_quota=user.used_card_quota,
         monthly_cost_limit=user.monthly_cost_limit,
         used_cost=user.used_cost,
         credit_balance=max(0, int(user.credit_balance or 0)),

@@ -125,7 +125,7 @@ def test_garment_validator_failures():
 def test_build_tasks_quantity_rules():
     tasks_3 = GPTImageCatalogService.build_tasks(3, has_back_image=True)
     assert len(tasks_3) == 3
-    assert [task["label"] for task in tasks_3] == ["Front", "Lifestyle", "Detail"]
+    assert [task["label"] for task in tasks_3] == ["Front", "Side", "Back"]
 
     tasks_6_back = GPTImageCatalogService.build_tasks(6, has_back_image=True)
     assert len(tasks_6_back) == 6

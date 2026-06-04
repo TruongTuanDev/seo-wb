@@ -50,6 +50,10 @@ class UsageSummaryResponse(BaseModel):
     allow_legacy_vton: bool
     allow_gpt_image: bool
     priority_queue: bool
+    monthly_card_quota: int = 0
+    used_card_quota: int = 0
+    remaining_card_quota: int = 0
+    card_quota_percent: float = 0.0
     credit_balance: int = 0
     credits_used: int = 0
     credits_granted: int = 0

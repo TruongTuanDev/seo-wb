@@ -10,6 +10,7 @@ from app.core.errors import AppError
 class UsagePlan:
     plan_type: str
     monthly_quota: int
+    monthly_card_quota: int
     monthly_cost_limit: float | None
     max_images_per_job: int
     allow_legacy_vton: bool
@@ -20,6 +21,7 @@ class UsagePlan:
 FREE_PLAN = UsagePlan(
     plan_type="free",
     monthly_quota=30,
+    monthly_card_quota=10,
     monthly_cost_limit=5.0,
     max_images_per_job=4,
     allow_legacy_vton=False,
@@ -30,6 +32,7 @@ FREE_PLAN = UsagePlan(
 PRO_PLAN = UsagePlan(
     plan_type="pro",
     monthly_quota=500,
+    monthly_card_quota=50,
     monthly_cost_limit=50.0,
     max_images_per_job=8,
     allow_legacy_vton=True,
@@ -40,6 +43,7 @@ PRO_PLAN = UsagePlan(
 AGENCY_PLAN = UsagePlan(
     plan_type="agency",
     monthly_quota=3000,
+    monthly_card_quota=500,
     monthly_cost_limit=300.0,
     max_images_per_job=12,
     allow_legacy_vton=True,
@@ -76,6 +80,7 @@ def apply_plan_defaults(user, plan_type: str | None = None, *, reference: dateti
     plan = get_usage_plan(plan_type or getattr(user, "plan_type", None))
     user.plan_type = plan.plan_type
     user.monthly_quota = plan.monthly_quota
+    user.monthly_card_quota = plan.monthly_card_quota
     user.monthly_cost_limit = plan.monthly_cost_limit
     now = reference.astimezone(timezone.utc) if reference else datetime.now(timezone.utc)
     if getattr(user, "quota_reset_at", None) is None:
@@ -84,7 +89,7 @@ def apply_plan_defaults(user, plan_type: str | None = None, *, reference: dateti
         user.last_quota_reset_at = now
     try:
         from app.services.billing_foundation import initialize_user_credits
-
+ 
         initialize_user_credits(user)
     except Exception:
         pass
@@ -94,6 +99,7 @@ def apply_plan_defaults(user, plan_type: str | None = None, *, reference: dateti
 def reset_usage_cycle(user, *, reference: datetime | None = None) -> datetime:
     now = reference.astimezone(timezone.utc) if reference else datetime.now(timezone.utc)
     user.used_quota = 0
+    user.used_card_quota = 0
     user.used_cost = 0.0
     try:
         from app.services.billing_foundation import monthly_credits_for_plan

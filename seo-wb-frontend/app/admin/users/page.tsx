@@ -20,6 +20,8 @@ type AdminUser = {
   priority_queue: boolean;
   monthly_quota: number;
   used_quota: number;
+  monthly_card_quota: number;
+  used_card_quota: number;
   monthly_cost_limit: number | null;
   used_cost: number;
   credit_balance: number;
@@ -31,7 +33,7 @@ type AdminUser = {
   close_to_cost_limit: boolean;
 };
 
-const emptyForm = { name: "", email: "", password: "", role: "user", plan_type: "free", monthly_quota: "30", monthly_cost_limit: "5" };
+const emptyForm = { name: "", email: "", password: "", role: "user", plan_type: "free", monthly_quota: "30", monthly_card_quota: "10", monthly_cost_limit: "5" };
 
 const PLAN_OPTIONS = [
   { value: "free", label: "Free" },
@@ -39,10 +41,10 @@ const PLAN_OPTIONS = [
   { value: "agency", label: "Agency" },
 ];
 
-const PLAN_DEFAULTS: Record<string, { monthly_quota: string; monthly_cost_limit: string }> = {
-  free: { monthly_quota: "30", monthly_cost_limit: "5" },
-  pro: { monthly_quota: "500", monthly_cost_limit: "50" },
-  agency: { monthly_quota: "3000", monthly_cost_limit: "300" },
+const PLAN_DEFAULTS: Record<string, { monthly_quota: string; monthly_card_quota: string; monthly_cost_limit: string }> = {
+  free: { monthly_quota: "30", monthly_card_quota: "10", monthly_cost_limit: "5" },
+  pro: { monthly_quota: "500", monthly_card_quota: "50", monthly_cost_limit: "50" },
+  agency: { monthly_quota: "3000", monthly_card_quota: "500", monthly_cost_limit: "300" },
 };
 
 export default function AdminUsersPage() {
@@ -72,6 +74,7 @@ export default function AdminUsersPage() {
       await api.post("/admin/users", {
         ...form,
         monthly_quota: Number(form.monthly_quota) || 0,
+        monthly_card_quota: Number(form.monthly_card_quota) || 0,
         monthly_cost_limit: form.monthly_cost_limit.trim() ? Number(form.monthly_cost_limit) : null,
         status: "active",
       });
@@ -143,6 +146,7 @@ export default function AdminUsersPage() {
       ...state,
       plan_type: planType,
       monthly_quota: defaults.monthly_quota,
+      monthly_card_quota: defaults.monthly_card_quota,
       monthly_cost_limit: defaults.monthly_cost_limit,
     }));
   };
@@ -165,7 +169,8 @@ export default function AdminUsersPage() {
                 ))}
               </select>
             </label>
-            <Input label="Monthly quota" type="number" value={form.monthly_quota} onChange={(e) => setForm((s) => ({ ...s, monthly_quota: e.target.value }))} />
+            <Input label="Monthly quota (Images)" type="number" value={form.monthly_quota} onChange={(e) => setForm((s) => ({ ...s, monthly_quota: e.target.value }))} />
+            <Input label="Monthly card quota (Posts)" type="number" value={form.monthly_card_quota} onChange={(e) => setForm((s) => ({ ...s, monthly_card_quota: e.target.value }))} />
             <Input label="Monthly cost limit (optional)" type="number" step="0.01" value={form.monthly_cost_limit} onChange={(e) => setForm((s) => ({ ...s, monthly_cost_limit: e.target.value }))} />
             <Button variant="brand" className="w-full" onClick={createUser}>Create user</Button>
           </div>
@@ -184,7 +189,8 @@ export default function AdminUsersPage() {
                   <th className="px-4 py-3">Role</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Plan</th>
-                  <th className="px-4 py-3">Quota</th>
+                  <th className="px-4 py-3">Image Quota</th>
+                  <th className="px-4 py-3">Card Quota</th>
                   <th className="px-4 py-3">Cost Limit</th>
                   <th className="px-4 py-3">Credits</th>
                   <th className="px-4 py-3">Actions</th>
@@ -275,6 +281,33 @@ export default function AdminUsersPage() {
                             value={user.used_quota}
                             onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, used_quota: Number(e.target.value) || 0 } : item))}
                             onBlur={(e) => updateUser(user, { used_quota: Number(e.target.value) || 0 })}
+                          />
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 min-w-[220px]">
+                      <div className="space-y-2">
+                        <div className="text-xs font-medium text-stone-700">{user.used_card_quota} / {user.monthly_card_quota}</div>
+                        <div className="h-2 overflow-hidden rounded-full bg-stone-200">
+                          <div
+                            className={`h-full ${quotaTone(user.used_card_quota, user.monthly_card_quota)}`}
+                            style={{ width: `${Math.min(100, user.monthly_card_quota > 0 ? (user.used_card_quota / user.monthly_card_quota) * 100 : 0)}%` }}
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
+                            type="number"
+                            value={user.monthly_card_quota}
+                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, monthly_card_quota: Number(e.target.value) || 0 } : item))}
+                            onBlur={(e) => updateUser(user, { monthly_card_quota: Number(e.target.value) || 0 })}
+                          />
+                          <input
+                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
+                            type="number"
+                            value={user.used_card_quota}
+                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, used_card_quota: Number(e.target.value) || 0 } : item))}
+                            onBlur={(e) => updateUser(user, { used_card_quota: Number(e.target.value) || 0 })}
                           />
                         </div>
                       </div>

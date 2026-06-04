@@ -103,6 +103,11 @@ def usage_summary(user: Annotated[User, Depends(get_current_user)]) -> UsageSumm
     remaining_quota = max(0, monthly_quota - used_quota)
     quota_percent = round((used_quota / monthly_quota) * 100, 2) if monthly_quota > 0 else 0.0
 
+    monthly_card_quota = max(0, int(user.monthly_card_quota or 0))
+    used_card_quota = max(0, int(user.used_card_quota or 0))
+    remaining_card_quota = max(0, monthly_card_quota - used_card_quota)
+    card_quota_percent = round((used_card_quota / monthly_card_quota) * 100, 2) if monthly_card_quota > 0 else 0.0
+
     used_cost = round(float(user.used_cost or 0.0), 4)
     monthly_cost_limit = float(user.monthly_cost_limit) if user.monthly_cost_limit is not None else None
     remaining_cost = round(max(0.0, monthly_cost_limit - used_cost), 4) if monthly_cost_limit is not None else None
@@ -114,6 +119,10 @@ def usage_summary(user: Annotated[User, Depends(get_current_user)]) -> UsageSumm
         used_quota=used_quota,
         remaining_quota=remaining_quota,
         quota_percent=quota_percent,
+        monthly_card_quota=monthly_card_quota,
+        used_card_quota=used_card_quota,
+        remaining_card_quota=remaining_card_quota,
+        card_quota_percent=card_quota_percent,
         monthly_cost_limit=monthly_cost_limit,
         used_cost=used_cost,
         remaining_cost=remaining_cost,

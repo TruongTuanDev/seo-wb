@@ -18,6 +18,7 @@ class AdminUserCreateRequest(BaseModel):
     status: str = "active"
     plan_type: str = "free"
     monthly_quota: int | None = None
+    monthly_card_quota: int | None = None
     monthly_cost_limit: float | None = None
 
 
@@ -30,6 +31,8 @@ class AdminUserUpdateRequest(BaseModel):
     plan_type: str | None = None
     monthly_quota: int | None = None
     used_quota: int | None = None
+    monthly_card_quota: int | None = None
+    used_card_quota: int | None = None
     monthly_cost_limit: float | None = None
     used_cost: float | None = None
     credit_balance: int | None = None
@@ -44,6 +47,8 @@ class AdminUserResponse(UserResponse):
     priority_queue: bool
     monthly_quota: int
     used_quota: int
+    monthly_card_quota: int
+    used_card_quota: int
     monthly_cost_limit: float | None
     used_cost: float
     credit_balance: int

@@ -187,6 +187,18 @@ def _enforce_user_quota(user: User, quantity: int) -> None:
         )
 
 
+def _enforce_user_card_quota(user: User, quantity: int) -> None:
+    monthly_card_quota = max(0, int(user.monthly_card_quota or 0))
+    used_card_quota = max(0, int(user.used_card_quota or 0))
+    if used_card_quota + quantity > monthly_card_quota:
+        remaining = max(0, monthly_card_quota - used_card_quota)
+        raise AppError(
+            "card_quota_exceeded",
+            f"Monthly card creation quota exceeded. Remaining card quota: {remaining}.",
+            403,
+        )
+
+
 def _estimate_generation_cost(runtime_config: dict[str, Any], job_type: str, quantity: int) -> float:
     model = str(runtime_config.get("default_image_model") or "gpt-image-2").lower()
     per_image = 0.05 if "gpt-image" in model else 0.03
@@ -1178,11 +1190,19 @@ async def push_draft(
     draft = _get_owned_draft(db, user, draft_id)
     store = get_owned_store(db, user, draft.store_id)
     groups = payload.card_payload or [CardUploadGroup.model_validate(group) for group in draft.card_payload]
+    
+    quantity = sum(len(group.variants) for group in groups)
+    _enforce_user_card_quota(user, quantity)
+    
     wb_response = await CardFlowService(settings, db, user, store).push_new_cards(groups, payload.dry_run)
     request_payload = [group.model_dump(mode="json", exclude_none=True) for group in groups]
     draft.status = "dry_run" if payload.dry_run else "pushed"
     draft.card_payload = request_payload
     draft.wb_response = wb_response
+    
+    if not payload.dry_run:
+        user.used_card_quota = user.used_card_quota + quantity
+        
     db.commit()
     return PushResponse(dry_run=payload.dry_run, request_payload=request_payload, wb_response=wb_response)
 
@@ -1196,6 +1216,10 @@ async def push_merge(
     user: Annotated[User, Depends(get_current_user)],
 ) -> PushResponse:
     store = get_owned_store(db, user, store_id)
+    
+    quantity = len(payload.cardsToAdd)
+    _enforce_user_card_quota(user, quantity)
+    
     variants = [variant.model_dump(mode="json", exclude_none=True) for variant in payload.cardsToAdd]
     wb_response = await CardFlowService(settings, db, user, store).push_merge_cards(
         payload.imtID,
@@ -1204,6 +1228,11 @@ async def push_merge(
         payload.subjectID,
     )
     request_payload = {"imtID": payload.imtID, "cardsToAdd": variants}
+    
+    if not payload.dry_run:
+        user.used_card_quota = user.used_card_quota + quantity
+        db.commit()
+        
     return PushResponse(dry_run=payload.dry_run, request_payload=request_payload, wb_response=wb_response)
 
 

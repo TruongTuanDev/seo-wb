@@ -17,6 +17,7 @@ class SubscriptionPlan(Base):
     currency: Mapped[str] = mapped_column(String(10), default="USD", nullable=False)
     monthly_credits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     monthly_quota: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    monthly_card_quota: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     monthly_cost_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_images_per_job: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     allow_legacy_vton: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
