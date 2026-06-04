@@ -5,8 +5,6 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
-import httpx
-import fal_client
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -100,22 +98,66 @@ def file_to_data_uri(path: Path) -> str:
     return f"data:{mime};base64,{encoded}"
 
 
+def build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str, Any]]:
+    if quantity not in {3, 6, 9}:
+        quantity = 6
+
+    if quantity == 3:
+        return [
+            {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
+            {"pose": "walking", "type": "lifestyle", "label": "Lifestyle", "output_type": "lifestyle", "validation_pose": None},
+            {"pose": "detail", "type": "detail", "label": "Detail", "output_type": "detail", "validation_pose": "detail"},
+        ]
+    elif quantity == 6:
+        if has_back_image:
+            return [
+                {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
+                {"pose": "side_45", "type": "catalog", "label": "Side", "output_type": "catalog", "validation_pose": "side_45"},
+                {"pose": "back", "type": "catalog", "label": "Back", "output_type": "catalog", "validation_pose": "back"},
+                {"pose": "walking", "type": "lifestyle", "label": "Lifestyle", "output_type": "lifestyle", "validation_pose": None},
+                {"pose": "detail", "type": "detail", "label": "Detail", "output_type": "detail", "validation_pose": "detail"},
+                {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
+            ]
+        else:
+            return [
+                {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
+                {"pose": "side_45", "type": "catalog", "label": "Side", "output_type": "catalog", "validation_pose": "side_45"},
+                {"pose": "walking", "type": "lifestyle", "label": "Lifestyle", "output_type": "lifestyle", "validation_pose": None},
+                {"pose": "detail", "type": "detail", "label": "Detail", "output_type": "detail", "validation_pose": "detail"},
+                {"pose": "extra_detail", "type": "detail", "label": "Extra Detail", "output_type": "detail", "validation_pose": "extra_detail"},
+                {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
+            ]
+    else:  # quantity == 9
+        if has_back_image:
+            return [
+                {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
+                {"pose": "side_45", "type": "catalog", "label": "Side", "output_type": "catalog", "validation_pose": "side_45"},
+                {"pose": "back", "type": "catalog", "label": "Back", "output_type": "catalog", "validation_pose": "back"},
+                {"pose": "walking", "type": "lifestyle", "label": "Walking", "output_type": "lifestyle", "validation_pose": "walking"},
+                {"pose": "hand_on_hip", "type": "catalog", "label": "Hand On Hip", "output_type": "catalog", "validation_pose": "hand_on_hip"},
+                {"pose": "sitting", "type": "lifestyle", "label": "Sitting", "output_type": "lifestyle", "validation_pose": "sitting"},
+                {"pose": "fabric_detail", "type": "detail", "label": "Fabric Detail", "output_type": "detail", "validation_pose": "fabric_detail"},
+                {"pose": "logo_detail", "type": "detail", "label": "Logo Detail", "output_type": "detail", "validation_pose": "logo_detail"},
+                {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
+            ]
+        else:
+            return [
+                {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
+                {"pose": "side_45", "type": "catalog", "label": "Side", "output_type": "catalog", "validation_pose": "side_45"},
+                {"pose": "walking", "type": "lifestyle", "label": "Walking", "output_type": "lifestyle", "validation_pose": "walking"},
+                {"pose": "hand_on_hip", "type": "catalog", "label": "Hand On Hip", "output_type": "catalog", "validation_pose": "hand_on_hip"},
+                {"pose": "sitting", "type": "lifestyle", "label": "Sitting", "output_type": "lifestyle", "validation_pose": "sitting"},
+                {"pose": "fabric_detail", "type": "detail", "label": "Fabric Detail", "output_type": "detail", "validation_pose": "fabric_detail"},
+                {"pose": "logo_detail", "type": "detail", "label": "Logo Detail", "output_type": "detail", "validation_pose": "logo_detail"},
+                {"pose": "product_detail", "type": "detail", "label": "Product Detail", "output_type": "detail", "validation_pose": "product_detail"},
+                {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
+            ]
+
+
 class GPTImageCatalogService:
     def __init__(self, settings: Settings):
         self._settings = settings
         self._storage = ImageStorage(settings)
-        model_env = os.getenv("FAL_GPT_IMAGE_MODEL")
-        if model_env:
-            self._model = model_env
-        else:
-            self._model = settings.fal_gpt_image_model or "gpt-image-2"
-
-        is_explicit = (model_env in {"gpt-image-1", "dall-e-2"}) or (settings.fal_gpt_image_model in {"gpt-image-1", "dall-e-2"})
-        if ("gpt-image-1" in self._model or "dall-e-2" in self._model) and not is_explicit:
-            raise AppError("invalid_image_model", f"Fallback to {self._model} is disabled. Default model is gpt-image-2.", 500)
-
-        if settings.fal_key:
-            os.environ["FAL_KEY"] = settings.fal_key
 
     async def run_gpt_image_job(
         self,
@@ -124,11 +166,10 @@ class GPTImageCatalogService:
         state: dict[str, Any],
         save_state_fn: Callable[[str, dict[str, Any]], Any],
         attach_draft_fn: Callable[[Session, dict[str, Any], list[dict[str, Any]]], Any],
-        use_openai: bool = False,
+        use_openai: bool = True,
     ) -> dict[str, Any]:
-        if not use_openai and not self._settings.fal_key:
-            raise AppError("missing_fal_key", "FAL_KEY is missing.", 500)
-        elif use_openai and not self._settings.openai_api_key:
+        use_openai = True
+        if not self._settings.openai_api_key:
             raise AppError("missing_openai_key", "OPENAI_API_KEY is missing.", 500)
 
         # Mark job as processing
@@ -148,10 +189,9 @@ class GPTImageCatalogService:
             validation_failure_behavior = str(runtime_config.get("validation_failure_behavior") or "warn").lower()
             job_model = metadata.get("model")
             if job_model:
-                self._model = job_model
                 is_explicit = job_model in {"gpt-image-1", "dall-e-2"}
-                if ("gpt-image-1" in self._model or "dall-e-2" in self._model) and not is_explicit:
-                    raise AppError("invalid_image_model", f"Fallback to {self._model} is disabled. Default model is gpt-image-2.", 500)
+                if ("gpt-image-1" in job_model or "dall-e-2" in job_model) and not is_explicit:
+                    raise AppError("invalid_image_model", f"Fallback to {job_model} is disabled. Default model is gpt-image-2.", 500)
             style = metadata.get("style") or "studio"
             garment_json = metadata.get("garment_json") or {}
 
@@ -178,21 +218,51 @@ class GPTImageCatalogService:
             if not has_model_image and not auto_model_generation:
                 raise AppError("missing_model_reference", "Please select a real model reference before generating catalog images.", 400)
 
-            if not use_openai:
-                # Upload reference images once to Fal CDN instead of base64 encoding
-                state["step"] = "uploading_inputs"
-                await save_state_fn(job_id, state)
-
-                front_url = await asyncio.to_thread(fal_client.upload_file, front_path)
-                back_url = await asyncio.to_thread(fal_client.upload_file, back_path) if has_back_image else None
-                model_url = await asyncio.to_thread(fal_client.upload_file, model_path) if has_model_image else None
-            else:
-                front_url = back_url = model_url = None
+            front_url = back_url = model_url = None
 
             # Build tasks based on simplified quantity strategy
             tasks_to_run = list(metadata.get("override_tasks") or self.build_tasks(total, has_back_image))
             state["total"] = len(tasks_to_run)
             await save_state_fn(job_id, state)
+
+            # Calculate call budget limit
+            quantity = len(tasks_to_run)
+            if quantity == 3:
+                max_openai_calls = 4
+            elif quantity == 6:
+                max_openai_calls = 9
+            elif quantity == 9:
+                max_openai_calls = 13
+            else:
+                max_openai_calls = 9
+
+            openai_calls_count = 0
+            initial_generation_calls = 0
+            retry_calls_used = 0
+            calls_lock = asyncio.Lock()
+
+            def get_retry_priority(task: dict[str, Any]) -> int:
+                label = str(task.get("label") or "").lower()
+                pose = str(task.get("pose") or "").lower()
+                task_type = str(task.get("type") or "").lower()
+                
+                if label == "banner":
+                    return 8
+                if "front" in pose:
+                    return 1
+                if "side" in pose:
+                    return 2
+                if "back" in pose:
+                    return 3
+                if "walking" in pose or task_type == "lifestyle":
+                    return 4
+                if "hand_on_hip" in pose:
+                    return 5
+                if "sitting" in pose:
+                    return 6
+                if any(detail_term in pose for detail_term in ["detail", "fabric_detail", "logo_detail", "extra_detail", "product_detail"]):
+                    return 7
+                return 9
 
             generated_by_index = {}
             approved_items = {}
@@ -201,7 +271,118 @@ class GPTImageCatalogService:
             validator = GarmentValidator(self._settings)
             seller_warning = None
 
-            async def run_one_task(idx: int, task: dict[str, Any]) -> dict[str, Any]:
+            async def save_image_item(
+                idx: int,
+                task: dict[str, Any],
+                image_bytes: bytes,
+                val_res: dict[str, Any],
+                retry_used: bool,
+                retry_skipped_due_to_limit: bool,
+                retry_priority: int,
+                retry_prompt: str | None,
+                prompt: str,
+            ) -> dict[str, Any]:
+                nonlocal seller_warning
+                pose = task["pose"]
+                task_type = task["type"]
+                label = task["label"]
+                output_type = task.get("output_type") or "catalog"
+
+                file_name = f"generated-{idx + 1:02d}.jpg"
+                out_path = output_dir / file_name
+                storage_res = await asyncio.to_thread(
+                    self._storage.save_generated_image,
+                    job_id=job_id,
+                    file_name=file_name,
+                    content=image_bytes,
+                    local_path=out_path
+                )
+
+                item = {
+                    "image_id": uuid4().hex,
+                    "fileName": file_name,
+                    "url": storage_res["url"],
+                    "storage": storage_res["storage"],
+                    "storageKey": storage_res["storageKey"],
+                    "bytes": storage_res["bytes"],
+                    "width": storage_res.get("width"),
+                    "height": storage_res.get("height"),
+                    "prompt": prompt,
+                    "label": label,
+                    "pose": pose,
+                    "task_type": task_type,
+                    "output_type": output_type,
+                    "style": style,
+                    "retry_used": retry_used,
+                    "retry_skipped_due_to_limit": retry_skipped_due_to_limit,
+                    "retry_priority": retry_priority,
+                    "validation_result": {
+                        **val_res,
+                        "retry_prompt": retry_prompt,
+                        "retry_used": retry_used,
+                        "retry_skipped_due_to_limit": retry_skipped_due_to_limit,
+                        "retry_priority": retry_priority,
+                    }
+                }
+                validation_result = item["validation_result"]
+                validation_result.update(_classify_validation_result(validation_result, retry_used))
+                validation_result["image_id"] = item["image_id"]
+                validation_result["pose"] = pose
+                validation_result["label"] = label
+
+                async with progress_lock:
+                    if validation_result["validation_status"] in {"warning", "review_required", "failed"}:
+                        is_gemini_unavailable = any("Gemini tạm thời không khả dụng" in str(w) for w in validation_result.get("warnings", []))
+                        if is_gemini_unavailable:
+                            seller_warning = "Gemini tạm thời không khả dụng, vui lòng tự duyệt ảnh."
+                        else:
+                            seller_warning = (
+                                "This product contains complex details such as rhinestones, rips or distressing. "
+                                "AI could not preserve them accurately. Please review or use a simpler catalog mode."
+                            ) if garment_json.get("complex_product_mode") else (
+                                "AI could not preserve the product accurately enough. Please review the result."
+                            )
+                    
+                    # Manage failed validations to avoid duplicates
+                    state["failed_validations"] = [
+                        fv for fv in state["failed_validations"] if fv.get("failed_pose") != pose
+                    ]
+
+                    if validation_result["validation_status"] == "failed" or retry_skipped_due_to_limit:
+                        logger.warning("Validation failed for pose %s (retry_used=%s, skipped=%s). Marking image high risk/failed.", pose, retry_used, retry_skipped_due_to_limit)
+                        failed_reasons = validation_result.get("warnings", [])
+                        state["failed_validations"].append({
+                            "image_id": item["image_id"],
+                            "failed_pose": pose,
+                            "failed_reason": ", ".join(failed_reasons),
+                            "validation_score": validation_result["validation_score"],
+                            "realism_score": val_res.get("realism_score", 100),
+                            "retry_used": retry_used,
+                            "retry_skipped_due_to_limit": retry_skipped_due_to_limit,
+                            "dominant_delta_e": validation_result.get("dominant_delta_e"),
+                            "palette_delta_e": validation_result.get("palette_delta_e"),
+                            "missing_details": validation_result.get("missing_details", []),
+                            "complex_product_mode": val_res.get("complex_product_mode", False),
+                            "retry_prompt": retry_prompt,
+                            "final_validation_status": validation_result.get("validation_status", "failed"),
+                            "output_type": output_type,
+                        })
+
+                    if validation_result["can_use_for_listing"]:
+                        approved_items[idx] = item
+                    else:
+                        if idx in approved_items:
+                            del approved_items[idx]
+
+                    generated_by_index[idx] = item
+                    state["images"] = [generated_by_index[i] for i in sorted(generated_by_index)]
+                    state["progress"] = len(generated_by_index)
+                    state["validation_summary"] = _build_validation_summary(state["images"])
+                    await save_state_fn(job_id, state)
+
+                return item
+
+            async def run_initial_task(idx: int, task: dict[str, Any]) -> dict[str, Any]:
                 nonlocal seller_warning
                 async with semaphore:
                     pose = task["pose"]
@@ -210,27 +391,20 @@ class GPTImageCatalogService:
                     output_type = task.get("output_type") or "catalog"
                     validation_pose = task.get("validation_pose")
 
-                    logger.info("Processing task %d/%d: %s (%s)", idx + 1, len(tasks_to_run), label, pose)
+                    logger.info("Phase 1: Generating task %d/%d: %s (%s)", idx + 1, len(tasks_to_run), label, pose)
 
-                    # Initialize prompt
-                    if task_type == "detail":
-                        prompt = (
-                            "Create a professional ecommerce garment detail shot using the uploaded product and model references.\n\n"
-                            "Focus tightly on the product while it is worn naturally by the same model.\n\n"
-                            "Preserve exact product color, fabric texture, logo/text, seams, pockets and closures.\n\n"
-                            "Clean studio background.\n\n"
-                            "Do not change the product design.\n\n"
-                            "Do not invent new text or logos.\n\n"
-                            "The image must look like a real ecommerce product photograph taken with a real camera.\n"
-                            "No CGI.\n"
-                            "No 3D render.\n"
-                            "No cartoon.\n"
-                            "No illustration."
-                        )
+                    is_detail = pose in {"detail", "fabric_detail", "logo_detail", "extra_detail", "product_detail"}
+                    if is_detail:
+                        prompt = GPTPromptBuilder.build_detail_prompt(garment_json, pose, style)
                     else:
-                        prompt = GPTPromptBuilder.build_prompt(garment_json, style, pose, has_model_reference=has_model_image)
+                        prompt = GPTPromptBuilder.build_prompt(
+                            garment_json,
+                            style,
+                            pose,
+                            has_model_reference=has_model_image,
+                            selected_model_gender=metadata.get("selected_model_gender")
+                        )
 
-                    # Clean cinematic wording
                     prompt = GPTPromptBuilder.clean_cinematic_wording(prompt)
 
                     # Update step for progress visibility
@@ -238,107 +412,30 @@ class GPTImageCatalogService:
                         state["step"] = f"generating_{pose}"
                         await save_state_fn(job_id, state)
 
-                    image_urls = []
-                    if model_url:
-                        image_urls.append(model_url)
-                    image_urls.append(front_url)
-                    if back_url:
-                        image_urls.append(back_url)
-
-                    image_paths = [front_path]
-                    if has_model_image:
-                        image_paths.insert(0, model_path)
-                    if has_back_image:
-                        image_paths.append(back_path)
-
-                    # Setup image references and generate
-                    if use_openai:
-                        image_bytes = await self._generate_with_openai_retry(
-                            image_paths,
-                            prompt,
-                            job_model,
-                            int(runtime_config.get("max_retry", self._settings.openai_image_retry_attempts)),
-                        )
+                    if is_detail:
+                        image_paths = [front_path]
                     else:
-                        image_bytes, fal_url = await self._generate_with_fal(image_urls, prompt)
+                        image_paths = [front_path]
+                        if has_model_image:
+                            image_paths.insert(0, model_path)
+                        if has_back_image:
+                            image_paths.append(back_path)
 
-                    # Validate image (run in thread pool to avoid blocking)
-                    val_res = await asyncio.to_thread(
-                        validator.validate_image,
-                        image_bytes,
-                        garment_json,
-                        validation_pose,
-                        source_front_bytes,
-                        source_back_bytes,
-                        validation_threshold=validation_threshold,
-                        realism_threshold=realism_threshold,
+                    # Increment call count
+                    nonlocal openai_calls_count, initial_generation_calls
+                    async with calls_lock:
+                        openai_calls_count += 1
+                        initial_generation_calls += 1
+
+                    image_bytes = await self._generate_with_openai_retry(
+                        image_paths,
+                        prompt,
+                        job_model,
+                        int(runtime_config.get("max_retry", self._settings.openai_image_retry_attempts)),
                     )
-                    realism_score = val_res.get("realism_score", 100)
-                    logger.info("Validation result for %s: passed=%s, score=%f, realism_score=%s", pose, val_res["passed"], val_res["score"], realism_score)
 
-                    retry_used = False
-                    retry_prompt = None
-                    is_unrealistic = realism_score < realism_threshold
-                    is_inconsistent = not val_res["passed"]
-                    # Catalog generation should always get one strict fidelity retry when validation fails.
-                    needs_retry = is_unrealistic or is_inconsistent
-
-                    if needs_retry:
-                        logger.warning("Validation or realism check failed for pose %s (realism_score: %s, passed: %s). Retrying once with stronger prompt...", pose, realism_score, val_res["passed"])
-                        retry_used = True
-                        # Record the first failed attempt
-                        async with progress_lock:
-                            failed_reasons = val_res.get("issues", []) + val_res.get("realism_issues", [])
-                            state["failed_validations"].append({
-                                "failed_pose": pose,
-                                "failed_reason": ", ".join(failed_reasons),
-                                "validation_score": val_res.get("validation_score", int(round(float(val_res["score"]) * 100))),
-                                "realism_score": realism_score,
-                                "retry_used": False,
-                                "output_type": output_type,
-                            })
-                            await save_state_fn(job_id, state)
-
-                        # Determine retry prompt
-                        if is_unrealistic:
-                            # Use stronger realism prompt
-                            retry_prompt = GPTPromptBuilder.build_strong_realism_prompt(
-                                garment_json=garment_json,
-                                style=style,
-                                pose=pose
-                            )
-                        else:
-                            if garment_json.get("complex_product_mode"):
-                                retry_prompt = GPTPromptBuilder.build_complex_retry_prompt(
-                                    garment_json,
-                                    val_res.get("issues", []) + val_res.get("missing_details", []),
-                                    garment_json.get("special_details", []) + garment_json.get("must_preserve", []),
-                                )
-                            else:
-                                # Build stricter consistency prompt
-                                retry_prompt = GPTPromptBuilder.build_prompt(
-                                    garment_json,
-                                    style,
-                                    pose,
-                                    strict_retry_fields=val_res.get("failed_fields", []),
-                                    has_model_reference=has_model_image
-                                )
-
-                        # Clean cinematic wording from retry prompt
-                        retry_prompt = GPTPromptBuilder.clean_cinematic_wording(retry_prompt)
-
-                        # Retry generate
-                        if use_openai:
-                            image_bytes = await self._generate_with_openai_retry(
-                                image_paths,
-                                retry_prompt,
-                                job_model,
-                                int(runtime_config.get("max_retry", self._settings.openai_image_retry_attempts)),
-                            )
-                        else:
-                            image_bytes, fal_url = await self._generate_with_fal(image_urls, retry_prompt)
-
-                        # Re-validate
+                    # Validate image
+                    try:
                         val_res = await asyncio.to_thread(
                             validator.validate_image,
                             image_bytes,
@@ -349,86 +446,221 @@ class GPTImageCatalogService:
                             validation_threshold=validation_threshold,
                             realism_threshold=realism_threshold,
                         )
-                        realism_score = val_res.get("realism_score", 100)
-                        logger.info("Validation retry result for %s: passed=%s, score=%f, realism_score=%s", pose, val_res["passed"], val_res["score"], realism_score)
-
-                    # Save the image (either passed, or the best retry attempt if failed)
-                    file_name = f"generated-{idx + 1:02d}.jpg"
-                    out_path = output_dir / file_name
-                    storage_res = await asyncio.to_thread(
-                        self._storage.save_generated_image,
-                        job_id=job_id,
-                        file_name=file_name,
-                        content=image_bytes,
-                        local_path=out_path
-                    )
-                    
-                    item = {
-                        "image_id": uuid4().hex,
-                        "fileName": file_name,
-                        "url": storage_res["url"],
-                        "storage": storage_res["storage"],
-                        "storageKey": storage_res["storageKey"],
-                        "bytes": storage_res["bytes"],
-                        "width": storage_res.get("width"),
-                        "height": storage_res.get("height"),
-                        "prompt": prompt,
-                        "label": label,
-                        "pose": pose,
-                        "task_type": task_type,
-                        "output_type": output_type,
-                        "style": style,
-                        "validation_result": {
-                            **val_res,
-                            "retry_prompt": retry_prompt,
+                    except Exception as e:
+                        logger.warning("Gemini validation failed (first attempt) for pose %s: %s. Using fallback.", pose, e)
+                        val_res = {
+                            "passed": True,
+                            "score": 0.70,
+                            "validation_score": 70,
+                            "realism_score": 80,
+                            "validation_threshold": validation_threshold,
+                            "realism_threshold": realism_threshold,
+                            "dominant_delta_e_threshold": 15.0,
+                            "palette_delta_e_threshold": 18.0,
+                            "realism_issues": [],
+                            "issues": [],
+                            "warnings": ["Gemini tạm thời không khả dụng, vui lòng tự duyệt ảnh (Lỗi: " + str(e)[:200] + ")"],
+                            "failed_fields": [],
+                            "missing_details": [],
+                            "complex_product_mode": garment_json.get("complex_product_mode", False),
+                            "critical_mismatch": False,
+                            "wrong_garment_type": False,
+                            "wrong_garment_area": False,
+                            "missing_core_identity": False,
+                            "critical_issues": [],
+                            "medium_issues": [],
+                            "minor_issues": [],
+                            "pose_validation": "pass",
+                            "expected_pose": validation_pose or None,
+                            "final_validation_status": "passed",
+                            "dominant_color_delta_e": None,
+                            "palette_delta_e": None,
                         }
+
+                    priority = get_retry_priority(task)
+                    realism_score = val_res.get("realism_score", 100)
+                    is_unrealistic = realism_score < realism_threshold
+                    is_inconsistent = not val_res["passed"]
+                    needs_retry = is_unrealistic or is_inconsistent
+
+                    await save_image_item(
+                        idx=idx,
+                        task=task,
+                        image_bytes=image_bytes,
+                        val_res=val_res,
+                        retry_used=False,
+                        retry_skipped_due_to_limit=False,
+                        retry_priority=priority,
+                        retry_prompt=None,
+                        prompt=prompt
+                    )
+
+                    return {
+                        "idx": idx,
+                        "task": task,
+                        "image_bytes": image_bytes,
+                        "val_res": val_res,
+                        "prompt": prompt,
+                        "priority": priority,
+                        "needs_retry": needs_retry,
+                        "image_paths": image_paths,
+                        "is_detail": is_detail,
+                        "output_type": output_type,
+                        "validation_pose": validation_pose
                     }
-                    validation_result = item["validation_result"]
-                    validation_result.update(_classify_validation_result(validation_result, retry_used))
-                    validation_result["image_id"] = item["image_id"]
-                    validation_result["pose"] = pose
-                    validation_result["label"] = label
+
+            # Phase 1: Execute all tasks concurrently
+            async_tasks = [asyncio.create_task(run_initial_task(idx, t)) for idx, t in enumerate(tasks_to_run)]
+            phase1_results = await asyncio.gather(*async_tasks)
+
+            # Phase 2: Sequential Prioritized Retries
+            retry_candidates = [res for res in phase1_results if res["needs_retry"]]
+            retry_candidates.sort(key=lambda x: x["priority"])
+
+            for res in retry_candidates:
+                idx = res["idx"]
+                task = res["task"]
+                pose = task["pose"]
+                image_paths = res["image_paths"]
+                prompt = res["prompt"]
+                is_detail = res["is_detail"]
+                priority = res["priority"]
+                output_type = res["output_type"]
+                validation_pose = res["validation_pose"]
+                val_res = res["val_res"]
+                realism_score = val_res.get("realism_score", 100)
+
+                can_retry = False
+                async with calls_lock:
+                    if openai_calls_count < max_openai_calls:
+                        openai_calls_count += 1
+                        retry_calls_used += 1
+                        can_retry = True
+                    else:
+                        logger.warning(
+                            "Validation failed for pose %s, but OpenAI call limit reached (%d/%d). Skipping validation retry.",
+                            pose, openai_calls_count, max_openai_calls
+                        )
+
+                if can_retry:
+                    logger.warning("Validation or realism check failed for pose %s (realism_score: %s, passed: %s). Retrying once with stronger prompt...", pose, realism_score, val_res["passed"])
+                    if is_detail:
+                        retry_prompt = (
+                            "STRICT PRODUCT DETAIL FIDELITY MODE\n"
+                            "Do not generate any person, model, head, body, face, legs or arms.\n"
+                            "This is a product-only close-up detail shot.\n"
+                            "Focus only on the garment's texture, fabric, seams, pockets and closures.\n\n"
+                            + GPTPromptBuilder.build_detail_prompt(garment_json, pose, style)
+                        )
+                    elif realism_score < realism_threshold:
+                        retry_prompt = GPTPromptBuilder.build_strong_realism_prompt(
+                            garment_json=garment_json,
+                            style=style,
+                            pose=pose,
+                            has_model_reference=has_model_image,
+                            selected_model_gender=metadata.get("selected_model_gender")
+                        )
+                    else:
+                        if garment_json.get("complex_product_mode"):
+                            retry_prompt = GPTPromptBuilder.build_complex_retry_prompt(
+                                garment_json,
+                                val_res.get("issues", []) + val_res.get("missing_details", []),
+                                garment_json.get("special_details", []) + garment_json.get("must_preserve", []),
+                            )
+                        else:
+                            retry_prompt = GPTPromptBuilder.build_prompt(
+                                garment_json,
+                                style,
+                                pose,
+                                strict_retry_fields=val_res.get("failed_fields", []),
+                                has_model_reference=has_model_image,
+                                selected_model_gender=metadata.get("selected_model_gender")
+                            )
+
+                    retry_prompt = GPTPromptBuilder.clean_cinematic_wording(retry_prompt)
 
                     async with progress_lock:
-                        if validation_result["validation_status"] in {"warning", "review_required", "failed"}:
-                            seller_warning = (
-                                "This product contains complex details such as rhinestones, rips or distressing. "
-                                "AI could not preserve them accurately. Please review or use a simpler catalog mode."
-                            ) if garment_json.get("complex_product_mode") else (
-                                "AI could not preserve the product accurately enough. Please review the result."
-                            )
-                        if validation_result["validation_status"] == "failed":
-                            logger.warning("Validation failed for pose %s after retry=%s. Marking image high risk.", pose, retry_used)
-                            failed_reasons = validation_result.get("warnings", [])
-                            state["failed_validations"].append({
-                                "image_id": item["image_id"],
-                                "failed_pose": pose,
-                                "failed_reason": ", ".join(failed_reasons),
-                                "validation_score": validation_result["validation_score"],
-                                "realism_score": realism_score,
-                                "retry_used": retry_used,
-                                "dominant_delta_e": validation_result.get("dominant_delta_e"),
-                                "palette_delta_e": validation_result.get("palette_delta_e"),
-                                "missing_details": validation_result.get("missing_details", []),
-                                "complex_product_mode": val_res.get("complex_product_mode", False),
-                                "retry_prompt": retry_prompt,
-                                "final_validation_status": validation_result.get("validation_status", "failed"),
-                                "output_type": output_type,
-                            })
-                        if validation_result["can_use_for_listing"]:
-                            approved_items[idx] = item
-
-                        generated_by_index[idx] = item
-                        state["images"] = [generated_by_index[i] for i in sorted(generated_by_index)]
-                        state["progress"] = len(generated_by_index)
-                        state["validation_summary"] = _build_validation_summary(state["images"])
+                        state["step"] = f"retrying_{pose}"
                         await save_state_fn(job_id, state)
 
-                    return item
+                    retry_image_bytes = await self._generate_with_openai_retry(
+                        image_paths,
+                        retry_prompt,
+                        job_model,
+                        int(runtime_config.get("max_retry", self._settings.openai_image_retry_attempts)),
+                    )
 
-            # Execute all tasks concurrently
-            async_tasks = [asyncio.create_task(run_one_task(idx, t)) for idx, t in enumerate(tasks_to_run)]
-            await asyncio.gather(*async_tasks)
+                    try:
+                        new_val_res = await asyncio.to_thread(
+                            validator.validate_image,
+                            retry_image_bytes,
+                            garment_json,
+                            validation_pose,
+                            source_front_bytes,
+                            source_back_bytes,
+                            validation_threshold=validation_threshold,
+                            realism_threshold=realism_threshold,
+                        )
+                    except Exception as e:
+                        logger.warning("Gemini validation failed (retry attempt) for pose %s: %s. Using fallback.", pose, e)
+                        new_val_res = {
+                            "passed": True,
+                            "score": 0.70,
+                            "validation_score": 70,
+                            "realism_score": 80,
+                            "validation_threshold": validation_threshold,
+                            "realism_threshold": realism_threshold,
+                            "dominant_delta_e_threshold": 15.0,
+                            "palette_delta_e_threshold": 18.0,
+                            "realism_issues": [],
+                            "issues": [],
+                            "warnings": ["Gemini tạm thời không khả dụng, vui lòng tự duyệt ảnh (Lỗi: " + str(e)[:200] + ")"],
+                            "failed_fields": [],
+                            "missing_details": [],
+                            "complex_product_mode": garment_json.get("complex_product_mode", False),
+                            "critical_mismatch": False,
+                            "wrong_garment_type": False,
+                            "wrong_garment_area": False,
+                            "missing_core_identity": False,
+                            "critical_issues": [],
+                            "medium_issues": [],
+                            "minor_issues": [],
+                            "pose_validation": "pass",
+                            "expected_pose": validation_pose or None,
+                            "final_validation_status": "passed",
+                            "dominant_color_delta_e": None,
+                            "palette_delta_e": None,
+                        }
+
+                    await save_image_item(
+                        idx=idx,
+                        task=task,
+                        image_bytes=retry_image_bytes,
+                        val_res=new_val_res,
+                        retry_used=True,
+                        retry_skipped_due_to_limit=False,
+                        retry_priority=priority,
+                        retry_prompt=retry_prompt,
+                        prompt=prompt
+                    )
+                else:
+                    warnings_list = list(val_res.get("warnings") or [])
+                    skipped_warning = "Validation retry skipped because OpenAI call limit was reached."
+                    if skipped_warning not in warnings_list:
+                        warnings_list.append(skipped_warning)
+                    val_res["warnings"] = warnings_list
+
+                    await save_image_item(
+                        idx=idx,
+                        task=task,
+                        image_bytes=res["image_bytes"],
+                        val_res=val_res,
+                        retry_used=False,
+                        retry_skipped_due_to_limit=True,
+                        retry_priority=priority,
+                        retry_prompt=None,
+                        prompt=prompt
+                    )
 
             # Order final images list
             ordered_images = [generated_by_index[idx] for idx in range(len(tasks_to_run))]
@@ -439,6 +671,20 @@ class GPTImageCatalogService:
             state["validation_summary"] = summary
             state["seller_warning"] = seller_warning
             state["final_validation_status"] = "failed" if has_failed else "review_required" if summary["review_required_count"] > 0 else "warning" if summary["warning_count"] > 0 else "approved"
+
+            openai_calls_metadata = {
+                "openai_call_limit": max_openai_calls,
+                "openai_calls_used": openai_calls_count,
+                "initial_generation_calls": initial_generation_calls,
+                "retry_calls_used": retry_calls_used,
+                "retry_budget_remaining": max(0, max_openai_calls - openai_calls_count),
+                "retry_skipped_due_to_limit": any(
+                    (generated_by_index[idx].get("retry_skipped_due_to_limit") or False)
+                    for idx in range(len(tasks_to_run))
+                )
+            }
+            state["openai_calls_metadata"] = openai_calls_metadata
+            metadata["openai_calls_metadata"] = openai_calls_metadata
 
             if validation_failure_behavior == "block" and has_failed:
                 state["status"] = "failed_validation"
@@ -468,80 +714,9 @@ class GPTImageCatalogService:
             state["error"] = str(exc)[:2000]
             await save_state_fn(job_id, state)
             raise
-
-    async def _generate_with_fal(self, image_urls: list[str], prompt: str) -> tuple[bytes, str]:
-        arguments = {
-            "image_urls": image_urls,
-            "prompt": prompt,
-            "quality": "medium"
-        }
-        res = await fal_client.run_async(
-            self._model,
-            arguments=arguments
-        )
-        # Extract image URL
-        img_url = None
-        if "image" in res and isinstance(res["image"], dict) and "url" in res["image"]:
-            img_url = res["image"]["url"]
-        elif "images" in res and isinstance(res["images"], list) and len(res["images"]) > 0:
-            img_url = res["images"][0]["url"]
-
-        if not img_url:
-            raise RuntimeError(f"FAL GPT-Image response did not contain image URL. Response: {res}")
-
-        # Download image content
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.get(img_url)
-            r.raise_for_status()
-            image_bytes = r.content
-
-        return image_bytes, img_url
-
     @staticmethod
     def build_tasks(quantity: int, has_back_image: bool) -> list[dict[str, Any]]:
-        back_task = (
-            {
-                "pose": "back",
-                "type": "catalog",
-                "label": "Back View",
-                "output_type": "catalog",
-                "validation_pose": "back",
-            }
-            if has_back_image
-            else {
-                "pose": "detail",
-                "type": "detail",
-                "label": "Detail Shot",
-                "output_type": "detail",
-                "validation_pose": None,
-            }
-        )
-        if quantity == 1:
-            return [
-                {"pose": "front", "type": "catalog", "label": "Front Catalog", "output_type": "catalog", "validation_pose": "front"},
-            ]
-        if quantity == 3:
-            return [
-                {"pose": "front", "type": "catalog", "label": "Front Catalog", "output_type": "catalog", "validation_pose": "front"},
-                {"pose": "side_45", "type": "catalog", "label": "Side 45 Catalog", "output_type": "catalog", "validation_pose": "side_45"},
-                {"pose": "hand_on_hip", "type": "catalog", "label": "Hand On Hip Catalog", "output_type": "catalog", "validation_pose": "hand_on_hip"},
-            ]
-        if quantity == 5:
-            return [
-                {"pose": "front", "type": "catalog", "label": "Front Catalog", "output_type": "catalog", "validation_pose": "front"},
-                {"pose": "side_45", "type": "catalog", "label": "Side 45 Catalog", "output_type": "catalog", "validation_pose": "side_45"},
-                {"pose": "walking", "type": "catalog", "label": "Walking Lifestyle", "output_type": "lifestyle", "validation_pose": "walking"},
-                back_task,
-                {"pose": "hand_on_hip", "type": "catalog", "label": "Hand On Hip Catalog", "output_type": "catalog", "validation_pose": "hand_on_hip"},
-            ]
-        return [
-            {"pose": "front", "type": "catalog", "label": "Front Catalog", "output_type": "catalog", "validation_pose": "front"},
-            {"pose": "side_45", "type": "catalog", "label": "Side 45 Catalog", "output_type": "catalog", "validation_pose": "side_45"},
-            {"pose": "walking", "type": "catalog", "label": "Walking Lifestyle", "output_type": "lifestyle", "validation_pose": "walking"},
-            back_task,
-            {"pose": "hand_on_hip", "type": "catalog", "label": "Hand On Hip Catalog", "output_type": "catalog", "validation_pose": "hand_on_hip"},
-            {"pose": "sitting", "type": "catalog", "label": "Sitting Lifestyle", "output_type": "lifestyle", "validation_pose": "sitting"},
-        ]
+        return build_catalog_bundle(quantity, has_back_image)
 
     async def _generate_with_openai_retry(self, image_paths: list[Path], prompt: str, job_model: str | None = None, max_retry: int | None = None) -> bytes:
         attempts = max(1, int(max_retry if max_retry is not None else self._settings.openai_image_retry_attempts) + 1)

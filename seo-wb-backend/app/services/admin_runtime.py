@@ -48,21 +48,33 @@ def get_effective_ai_runtime_settings(db: Session, settings: Settings) -> Effect
     )
 
 
-def list_public_model_templates(db: Session, settings: Settings) -> list[dict]:
-    rows = db.scalars(
-        select(ModelTemplate).where(
-            ModelTemplate.status == "active",
-            ModelTemplate.quality_status == "approved",
-            ModelTemplate.deleted_at.is_(None),
-        ).order_by(ModelTemplate.created_at.desc())
-    ).all()
+def list_public_model_templates(db: Session, settings: Settings, garment_type: str | None = None) -> list[dict]:
+    query = select(ModelTemplate).where(
+        ModelTemplate.status == "active",
+        ModelTemplate.quality_status == "approved",
+        ModelTemplate.deleted_at.is_(None),
+    )
+    if garment_type:
+        from sqlalchemy import or_
+        query = query.where(
+            or_(
+                ModelTemplate.garment_type == garment_type,
+                ModelTemplate.garment_type == "full_body",
+                ModelTemplate.garment_type.is_(None)
+            )
+        )
+    rows = db.scalars(query.order_by(ModelTemplate.created_at.desc())).all()
     if rows:
         return [_public_model_item(row) for row in rows]
 
     if settings.app_env.lower() in {"local", "development", "dev", "test"}:
         from app.services.virtual_try_on import BUILTIN_MODELS
 
-        return [_public_builtin_model_item(item) for item in BUILTIN_MODELS]
+        items = [_public_builtin_model_item(item) for item in BUILTIN_MODELS]
+        if garment_type:
+            # Built-in models can default to full_body or match the requested garment_type
+            items = [item for item in items if item.get("garmentType") == garment_type or item.get("garmentType") == "full_body"]
+        return items
     return []
 
 
@@ -90,6 +102,7 @@ def _public_model_item(model: ModelTemplate) -> dict:
         "description": " • ".join(description_parts) if description_parts else model.name,
         "availablePoses": available_poses,
         "isAiGenerated": bool(model.is_ai_generated),
+        "garmentType": model.garment_type or "full_body",
     }
 
 
@@ -108,6 +121,7 @@ def _public_builtin_model_item(model: dict) -> dict:
         "description": model.get("description") or model.get("name", ""),
         "availablePoses": model.get("availablePoses") or ["front"],
         "isAiGenerated": bool(model.get("isAiGenerated")),
+        "garmentType": model.get("garmentType") or "full_body",
     }
 
 
@@ -123,3 +137,33 @@ def soft_delete_model(model: ModelTemplate) -> None:
 
 def soft_delete_job(job: GeneratedImageJob) -> None:
     job.deleted_at = datetime.now(timezone.utc)
+
+
+def ensure_builtin_model_seeds(db: Session) -> None:
+    from app.services.virtual_try_on import BUILTIN_MODELS
+
+    changed = False
+    for item in BUILTIN_MODELS:
+        m_id = item["id"]
+        existing = db.get(ModelTemplate, m_id)
+        if existing is None:
+            db.add(
+                ModelTemplate(
+                    id=m_id,
+                    name=item["name"],
+                    gender=item["gender"].lower(),
+                    body_type=item["bodyType"].lower(),
+                    height_cm=item.get("height"),
+                    weight_kg=item.get("weight"),
+                    garment_type=item.get("garmentType", "full_body"),
+                    is_ai_generated=False,
+                    status="active",
+                    quality_status="approved",
+                    reference_image_url=item["frontImageUrl"],
+                    thumbnail_url=item["imageUrl"],
+                    poses={"front": item["frontImageUrl"]},
+                )
+            )
+            changed = True
+    if changed:
+        db.commit()

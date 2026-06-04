@@ -168,14 +168,13 @@ export interface RecommendationPayload {
   recommendedBackground?: string;
 }
 
-const SUPPORTED_CATALOG_QUANTITIES = [1, 3, 5, 6] as const;
+const SUPPORTED_CATALOG_QUANTITIES = [3, 6, 9] as const;
 const MAX_UPLOAD_IMAGE_BYTES = 10 * 1024 * 1024;
 
-function normalizeCatalogQuantity(quantity: number): 1 | 3 | 5 | 6 {
-  if (quantity <= 1) return 1;
+function normalizeCatalogQuantity(quantity: number): 3 | 6 | 9 {
   if (quantity <= 3) return 3;
-  if (quantity <= 5) return 5;
-  return 6;
+  if (quantity <= 6) return 6;
+  return 9;
 }
 
 function toMediaUrl(url?: string | null) {
@@ -1095,16 +1094,22 @@ export function MediaGallery({
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
                     <div className="font-semibold text-zinc-900">Pose Bundle Preview</div>
                     <div className="mt-1 leading-relaxed">
-                      {quantity === 1 && "Front catalog view."}
-                      {quantity === 3 && "Front catalog, side 45 catalog, hand on hip catalog."}
-                      {quantity === 5 && `Front catalog, side 45 catalog, walking lifestyle, ${backImage ? "back view" : "detail shot"}, hand on hip catalog.`}
-                      {quantity === 6 && `Front catalog, side 45 catalog, walking lifestyle, ${backImage ? "back view" : "detail shot"}, hand on hip catalog, sitting lifestyle.`}
+                      {quantity === 3 && "Front, Lifestyle, Detail"}
+                      {quantity === 6 && (backImage 
+                        ? "Front, Side, Back, Lifestyle, Detail, Banner"
+                        : "Front, Side, Lifestyle, Detail, Extra Detail, Banner")}
+                      {quantity === 9 && (backImage 
+                        ? "Front, Side, Back, Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Banner"
+                        : "Front, Side, Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Product Detail, Banner")}
                     </div>
-                    {!backImage && (
-                      <div className="mt-2 text-[11px] text-zinc-500">
-                        No back product image uploaded, so the back slot will be replaced with a detail shot.
-                      </div>
-                    )}
+                    <div className="mt-2 text-[11px] text-zinc-500">
+                      Back view is generated only when a back product image is uploaded.
+                      {!backImage && quantity > 3 && (
+                        <span className="block mt-0.5 text-amber-600 font-medium">
+                          Note: Back view will be replaced by {quantity === 6 ? "Extra Detail" : "Product Detail"} shot.
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1126,7 +1131,7 @@ export function MediaGallery({
                           : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
                       }`}
                     >
-                      {qty} {qty === 1 ? "Image" : "Images"}
+                      {qty} Images
                     </button>
                   ))}
                 </div>

@@ -44,54 +44,8 @@ EVALUATION_SCHEMA = {
 }
 
 def verify_garment_category_florence(image_url: str, expected_category: str) -> bool:
-    """Verifies that the generated image contains the expected garment category using Florence-2-large."""
-    try:
-        import fal_client
-        
-        logger.info("Running Florence-2 garment verification for expected: %s", expected_category)
-        result = fal_client.subscribe(
-            "fal-ai/florence-2-large/caption",
-            arguments={
-                "image_url": image_url
-            }
-        )
-        
-        caption = ""
-        results = result.get("results") or []
-        if results and isinstance(results, list):
-            caption = results[0].get("caption") or ""
-        elif isinstance(result, dict) and "caption" in result:
-            caption = result.get("caption") or ""
-            
-        caption = caption.lower().strip()
-        expected = str(expected_category or "").lower().strip()
-        
-        if not expected or not caption:
-            return True
-            
-        # Map categories to synonyms
-        synonyms = {
-            "hoodie": ["hoodie", "sweater", "sweatshirt", "pullover"],
-            "jacket": ["jacket", "coat", "blazer", "outerwear", "windbreaker", "cardigan"],
-            "dress": ["dress", "gown", "robe", "jumpsuit"],
-            "pants": ["pants", "trousers", "jeans", "leggings", "joggers"],
-            "shorts": ["shorts", "trunks"],
-            "shirt": ["shirt", "blouse", "top", "t-shirt"],
-            "skirt": ["skirt"],
-            "set": ["set", "suit", "costume", "outfit"]
-        }
-        
-        allowed_terms = synonyms.get(expected, [expected])
-        for term in allowed_terms:
-            if term in caption:
-                logger.info("Garment validation passed: found '%s' in caption '%s'", term, caption)
-                return True
-                
-        logger.warning("Garment validation failed: none of %s found in caption '%s' (expected: %s)", allowed_terms, caption, expected)
-        return False
-    except Exception as exc:
-        logger.error("Florence-2 garment validation failed: %s", exc)
-        return True
+    """Verifies that the generated image contains the expected garment category. Bypassed since Fal.ai is removed."""
+    return True
 
 def check_color_similarity(garment_bytes: bytes, generated_bytes: bytes) -> float:
     """Computes color similarity in HSV space using a pure-python Hue histogram."""

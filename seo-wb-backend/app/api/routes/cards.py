@@ -463,11 +463,12 @@ async def get_generated_image(
 
 @router.get("/try-on/models")
 def list_try_on_models(
-    db: Annotated[Session, Depends(get_db)],
-    settings: Annotated[Settings, Depends(get_settings)],
-    user: Annotated[User, Depends(get_current_user)],
+    garment_type: str | None = None,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    return list_public_model_templates(db, settings)
+    return list_public_model_templates(db, settings, garment_type=garment_type)
 
 
 @router.post("/drafts/{draft_id}/try-on/jobs", response_model=ImageGenerationJobResponse)

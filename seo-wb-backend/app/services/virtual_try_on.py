@@ -9,7 +9,6 @@ import httpx
 from redis.asyncio import Redis
 from sqlalchemy.orm import Session
 
-import fal_client
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.services.image_storage import ImageStorage
@@ -369,201 +368,94 @@ def build_simplified_catalog_tasks(
     back_data_uri: str | None,
     model_metadata: dict
 ) -> list[dict[str, Any]]:
-    # Retrieve available poses from metadata
     available_poses = model_metadata.get("availablePoses", ["front"])
     
-    # Determine poses with fallback to front
-    side_pose = "side_45" if "side_45" in available_poses else "front"
-    walking_pose = "walking" if "walking" in available_poses else "front"
-    
-    model_dir = Path("storage/models") / model_id
+    model_dir = Path("storage/admin_models") / model_id
+    if not model_dir.is_dir():
+        model_dir = Path("storage/models") / model_id
     
     def get_model_path_for_pose(pose: str) -> Path:
-        for ext in [".png", ".jpg", ".jpeg"]:
+        for ext in [".png", ".jpg", ".jpeg", ".webp", ".JPG"]:
             p = model_dir / f"{pose}{ext}"
             if p.exists():
                 return p
-        # Fallback path if file doesn't exist
-        fallback_p = Path("storage/models") / f"{model_id}.png"
-        if not fallback_p.exists():
-            fallback_p = Path("storage/models") / model_id / "front.png"
-        if not fallback_p.exists():
-            fallback_p = Path("storage/models") / "model1.png"
-    tasks = []
-    
-    # We build based on quantity (3, 5, 8)
-    if quantity == 1:
-        # 1. Front Catalog
-        front_path = get_model_path_for_pose("front")
-        tasks.append({
-            "type": "vton_raw",
-            "pose": "front",
-            "human_path": front_path,
-            "garment_url": front_data_uri,
-            "label": "Front Catalog",
-            "style_key": "none"
-        })
-    elif quantity == 3:
-        # 1. Front Catalog
-        front_path = get_model_path_for_pose("front")
-        tasks.append({
-            "type": "vton_raw",
-            "pose": "front",
-            "human_path": front_path,
-            "garment_url": front_data_uri,
-            "label": "Front Catalog",
-            "style_key": "none"
-        })
-        # 2. Product Detail
-        tasks.append({
-            "type": "logo_detail",
-            "pose": "detail",
-            "garment_url": front_data_uri,
-            "label": "Product Detail",
-            "style_key": "none"
-        })
-        # 3. Banner
-        tasks.append({
-            "type": "vton_bg",
-            "pose": "front",
-            "human_path": front_path,
-            "garment_url": front_data_uri,
-            "label": "Banner",
-            "style_key": selected_style
-        })
+        # Check reference file if pose is front
+        for ext in [".png", ".jpg", ".jpeg", ".webp", ".JPG"]:
+            p_ref = model_dir / f"reference{ext}"
+            if p_ref.exists():
+                return p_ref
         
-    elif quantity == 8:
-        # 1. Front Catalog
-        front_path = get_model_path_for_pose("front")
-        tasks.append({
-            "type": "vton_raw",
-            "pose": "front",
-            "human_path": front_path,
-            "garment_url": front_data_uri,
-            "label": "Front Catalog",
-            "style_key": "none"
-        })
-        # 2. Side Catalog
-        side_path = get_model_path_for_pose(side_pose)
-        tasks.append({
-            "type": "vton_raw",
-            "pose": side_pose,
-            "human_path": side_path,
-            "garment_url": front_data_uri,
-            "label": "Side Catalog",
-            "style_key": "none"
-        })
-        # 3. Lifestyle
-        walking_path = get_model_path_for_pose(walking_pose)
-        tasks.append({
-            "type": "vton_bg",
-            "pose": walking_pose,
-            "human_path": walking_path,
-            "garment_url": front_data_uri,
-            "label": "Lifestyle",
-            "style_key": selected_style
-        })
-        # 4. Studio
-        tasks.append({
-            "type": "vton_bg",
-            "pose": "front",
-            "human_path": front_path,
-            "garment_url": front_data_uri,
-            "label": "Studio",
-            "style_key": "studio"
-        })
-        # 5. Product Detail
-        tasks.append({
-            "type": "logo_detail",
-            "pose": "detail",
-            "garment_url": front_data_uri,
-            "label": "Product Detail",
-            "style_key": "none"
-        })
-        # 6. Fabric Detail
-        tasks.append({
-            "type": "fabric_detail",
-            "pose": "detail",
-            "garment_url": front_data_uri,
-            "label": "Fabric Detail",
-            "style_key": "none"
-        })
-        # 7. Back Detail
-        if has_back_image:
+        # If the requested pose is not front and it was not found, try front
+        if pose != "front":
+            for ext in [".png", ".jpg", ".jpeg", ".webp", ".JPG"]:
+                p = model_dir / f"front{ext}"
+                if p.exists():
+                    return p
+        
+        # Fallback paths
+        fallback_p = Path("storage/models") / f"{model_id}.png"
+        if fallback_p.exists():
+            return fallback_p
+        
+        # Default global fallback
+        return Path("storage/models") / "model1.png"
+
+    def resolve_pose(desired_pose: str) -> str:
+        if desired_pose in ["front", "side_45", "back", "walking", "hand_on_hip", "sitting"]:
+            if desired_pose in available_poses:
+                return desired_pose
+            return "front"
+        return desired_pose
+
+    from app.services.gpt_image_catalog import build_catalog_bundle
+    abstract_tasks = build_catalog_bundle(quantity, has_back_image)
+    
+    tasks = []
+    for atask in abstract_tasks:
+        ttype = atask["type"]
+        pose_name = atask["pose"]
+        label = atask["label"]
+        
+        if ttype == "catalog":
+            resolved = resolve_pose(pose_name)
+            p_path = get_model_path_for_pose(resolved)
+            g_url = back_data_uri if (pose_name == "back" and has_back_image and back_data_uri) else front_data_uri
             tasks.append({
-                "type": "back_detail",
-                "pose": "detail",
-                "garment_url": back_data_uri,
-                "label": "Back Detail",
+                "type": "vton_raw",
+                "pose": resolved,
+                "human_path": p_path,
+                "garment_url": g_url,
+                "label": label,
                 "style_key": "none"
             })
-        else:
+        elif ttype == "lifestyle":
+            resolved = resolve_pose(pose_name)
+            p_path = get_model_path_for_pose(resolved)
             tasks.append({
-                "type": "front_detail",
+                "type": "vton_bg",
+                "pose": resolved,
+                "human_path": p_path,
+                "garment_url": front_data_uri,
+                "label": label,
+                "style_key": selected_style
+            })
+        elif ttype == "detail":
+            vton_type = "logo_detail"
+            if pose_name == "fabric_detail":
+                vton_type = "fabric_detail"
+            elif pose_name == "logo_detail":
+                vton_type = "logo_detail"
+            elif pose_name in {"front_detail", "extra_detail"}:
+                vton_type = "front_detail"
+            
+            tasks.append({
+                "type": vton_type,
                 "pose": "detail",
                 "garment_url": front_data_uri,
-                "label": "Front Detail",
+                "label": label,
                 "style_key": "none"
             })
-        # 8. Banner
-        tasks.append({
-            "type": "vton_bg",
-            "pose": "front",
-            "human_path": front_path,
-            "garment_url": front_data_uri,
-            "label": "Banner",
-            "style_key": selected_style
-        })
-        
-    else:  # Default to 5
-        # 1. Front Catalog
-        front_path = get_model_path_for_pose("front")
-        tasks.append({
-            "type": "vton_raw",
-            "pose": "front",
-            "human_path": front_path,
-            "garment_url": front_data_uri,
-            "label": "Front Catalog",
-            "style_key": "none"
-        })
-        # 2. Side Catalog
-        side_path = get_model_path_for_pose(side_pose)
-        tasks.append({
-            "type": "vton_raw",
-            "pose": side_pose,
-            "human_path": side_path,
-            "garment_url": front_data_uri,
-            "label": "Side Catalog",
-            "style_key": "none"
-        })
-        # 3. Lifestyle
-        walking_path = get_model_path_for_pose(walking_pose)
-        tasks.append({
-            "type": "vton_bg",
-            "pose": walking_pose,
-            "human_path": walking_path,
-            "garment_url": front_data_uri,
-            "label": "Lifestyle",
-            "style_key": selected_style
-        })
-        # 4. Product Detail
-        tasks.append({
-            "type": "logo_detail",
-            "pose": "detail",
-            "garment_url": front_data_uri,
-            "label": "Product Detail",
-            "style_key": "none"
-        })
-        # 5. Banner
-        tasks.append({
-            "type": "vton_bg",
-            "pose": "front",
-            "human_path": front_path,
-            "garment_url": front_data_uri,
-            "label": "Banner",
-            "style_key": selected_style
-        })
-        
+            
     return tasks
 
 class VirtualTryOnService:
@@ -573,8 +465,6 @@ class VirtualTryOnService:
         self._storage = ImageStorage(settings)
         self._vton_cache = {}
         self._vton_cache_lock = asyncio.Lock()
-        if settings.fal_key:
-            os.environ["FAL_KEY"] = settings.fal_key
 
     def get_models(self) -> list[dict[str, Any]]:
         return BUILTIN_MODELS
@@ -587,8 +477,7 @@ class VirtualTryOnService:
         save_state_fn: Callable[[str, dict[str, Any]], Any],
         attach_draft_fn: Callable[[Session, dict[str, Any], list[dict[str, Any]]], Any]
     ) -> dict[str, Any]:
-        if not self._settings.fal_key:
-            raise AppError("missing_fal_key", "FAL_KEY is missing.", 500)
+        raise AppError("fal_ai_not_supported", "Virtual Try-On is not supported because Fal.ai integration has been removed.", 400)
 
         # Update status to processing
         state["status"] = "processing"
@@ -607,11 +496,37 @@ class VirtualTryOnService:
             model_id = metadata.get("model_id") or "model_1"
             if "/" in model_id:
                 model_id = Path(model_id).parent.name
-            if not model_id.startswith("model_"):
+
+            from app.models.admin import ModelTemplate
+            db_model = db.get(ModelTemplate, model_id)
+            model_exists = False
+            if db_model and db_model.deleted_at is None:
+                model_exists = True
+            elif model_id.startswith("model_"):
+                model_exists = True
+            elif (Path("storage/admin_models") / model_id).is_dir():
+                model_exists = True
+
+            if not model_exists:
                 model_id = "model_1"
+                db_model = db.get(ModelTemplate, model_id)
 
             # 1. Resolve model metadata and build tasks using build_simplified_catalog_tasks
-            model_metadata = next((m for m in BUILTIN_MODELS if m["id"] == model_id), {"availablePoses": ["front"]})
+            if db_model:
+                poses = db_model.poses or {}
+                available_poses = [pose for pose, url in poses.items() if url] or ["front"]
+                model_metadata = {
+                    "id": db_model.id,
+                    "name": db_model.name,
+                    "gender": db_model.gender,
+                    "bodyType": db_model.body_type,
+                    "height": db_model.height_cm or 0,
+                    "weight": db_model.weight_kg or 0,
+                    "availablePoses": available_poses,
+                    "isAiGenerated": bool(db_model.is_ai_generated),
+                }
+            else:
+                model_metadata = next((m for m in BUILTIN_MODELS if m["id"] == model_id), {"availablePoses": ["front"]})
             
             # File paths
             job_dir = IMAGE_JOB_STORAGE_DIR / job_id
@@ -918,78 +833,12 @@ class VirtualTryOnService:
             raise
 
     async def _run_vton(self, human_url: str, garment_url: str, garment_type: str, metadata: dict = None) -> str:
-        """Calls fal-ai/idm-vton endpoint to dress the model."""
-        meta = metadata or {}
-        brand = meta.get("brand") or ""
-        brand_prompt = "Preserve all visible brand markings."
-        brand_lower = brand.lower().strip()
-        if "nike" in brand_lower:
-            brand_prompt = "Preserve all Nike logos and branding."
-        elif "adidas" in brand_lower:
-            brand_prompt = "Preserve all Adidas stripes and logos."
-        elif brand:
-            brand_prompt = f"Preserve all {brand} logos and branding."
-
-        if garment_type == "upper_body":
-            description = (
-                "Replace only the upper-body garment with the uploaded product. "
-                "Keep face, hair, hands, pants and shoes unchanged. "
-                f"Preserve logos, embroidery, text, fabric texture and color accuracy. {brand_prompt} "
-                "Create a premium ecommerce catalog image."
-            )
-        elif garment_type == "lower_body":
-            description = (
-                "Replace only the lower-body garment with the uploaded product. "
-                "Keep shirt, shoes, face, hair and hands unchanged. "
-                f"Preserve garment shape and material details. {brand_prompt}"
-            )
-        elif garment_type == "full_body":
-            description = (
-                "Dress the model in the uploaded full-body garment. "
-                f"Preserve face, hair, body shape and product details. {brand_prompt} "
-                "Generate premium fashion catalog photography."
-            )
-        else:
-            description = f"Dress the model in the uploaded garment. Preserve face, hair, hands, body shape and product details. {brand_prompt}"
-
-
-        arguments = {
-            "human_image_url": human_url,
-            "garment_image_url": garment_url,
-            "description": description,
-            "garment_type": garment_type
-        }
-        
-        result = await fal_client.run_async(
-            "fal-ai/idm-vton",
-            arguments=arguments
-        )
-        
-        image_obj = result.get("image")
-        if not image_obj or not image_obj.get("url"):
-            raise RuntimeError("VTON API did not return output image.")
-        return image_obj["url"]
+        """Calls fal-ai/idm-vton endpoint to dress the model. Disabled since Fal.ai is removed."""
+        raise AppError("fal_ai_not_supported", "Virtual Try-On is not supported because Fal.ai integration has been removed.", 400)
 
     async def _run_img2img(self, image_url: str, prompt: str, strength: float) -> str:
-        """Calls fal-ai/flux/dev/image-to-image for context diversification."""
-        arguments = {
-            "image_url": image_url,
-            "prompt": prompt,
-            "strength": strength,
-            "num_inference_steps": 28,
-            "guidance_scale": 3.5,
-            "output_format": "jpeg"
-        }
-        
-        result = await fal_client.run_async(
-            "fal-ai/flux/dev/image-to-image",
-            arguments=arguments
-        )
-        
-        images = result.get("images")
-        if not images or not isinstance(images, list) or not images[0].get("url"):
-            raise RuntimeError("Flux Image-to-Image API did not return output image.")
-        return images[0]["url"]
+        """Calls fal-ai/flux/dev/image-to-image for context diversification. Disabled since Fal.ai is removed."""
+        raise AppError("fal_ai_not_supported", "Virtual Try-On is not supported because Fal.ai integration has been removed.", 400)
 
     async def _download_image(self, url: str) -> bytes:
         """Downloads the generated image bytes from fal CDN."""

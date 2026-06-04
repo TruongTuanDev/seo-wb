@@ -118,7 +118,8 @@ The product itself must remain visually identical to the source.
         style: str,
         pose: str,
         strict_retry_fields: list[str] | None = None,
-        has_model_reference: bool = True
+        has_model_reference: bool = True,
+        selected_model_gender: str | None = None
     ) -> str:
         # Standardize style
         style_key = style.lower().strip()
@@ -237,11 +238,21 @@ The product itself must remain visually identical to the source.
         must_preserve = garment_json.get("must_preserve", [])
         must_not_change = garment_json.get("must_not_change", [])
         
+        garment_gender = garment_json.get("gender") or "female"
+        if has_model_reference and selected_model_gender:
+            norm_g = selected_model_gender.lower().strip()
+            if "female" in norm_g or "women" in norm_g:
+                garment_gender = "Female"
+            elif "male" in norm_g or "men" in norm_g or "boy" in norm_g:
+                garment_gender = "Male"
+            else:
+                garment_gender = "Unisex"
+        
         garment_info = (
             f"Garment Specifications:\n"
             f"- Product Type: {garment_json.get('product_type')}\n"
             f"- Category: {garment_json.get('category')}\n"
-            f"- Gender: {garment_json.get('gender')}\n"
+            f"- Gender: {garment_gender}\n"
             f"- Main Color: {garment_json.get('main_color')}\n"
             f"- Secondary Color: {secondary_color}\n"
             f"- Color Palette: {', '.join(color_palette) if color_palette else 'n/a'}\n"
@@ -302,6 +313,8 @@ The product itself must remain visually identical to the source.
         garment_json: dict[str, Any],
         style: str,
         pose: str,
+        has_model_reference: bool = True,
+        selected_model_gender: str | None = None
     ) -> str:
         # Standardize style/pose description
         style_key = style.lower().strip()
@@ -341,8 +354,23 @@ The product itself must remain visually identical to the source.
         # Reconstruct standard color-fabric-category phrasing
         product_desc = f"{main_color} {fabric_texture} {material} {product_type}"
 
-        article_context_block = GPTPromptBuilder._article_context_block(garment_json)
-        model_profile_block = GPTPromptBuilder._model_profile_block(garment_json, has_model_reference=False)
+        # Setup model profile with gender override
+        gender_override_json = dict(garment_json)
+        if has_model_reference and selected_model_gender:
+            gender_override_json["gender"] = selected_model_gender
+            model_profile = gender_override_json.get("model_profile") or {}
+            model_profile["gender"] = selected_model_gender
+            gender_override_json["model_profile"] = model_profile
+
+        article_context_block = GPTPromptBuilder._article_context_block(gender_override_json)
+        model_profile_block = GPTPromptBuilder._model_profile_block(gender_override_json, has_model_reference=has_model_reference)
+
+        if has_model_reference:
+            model_ref_inst = "Use image 1 as the exact model reference."
+            product_ref_inst = "Use image 2 as the exact product reference."
+        else:
+            model_ref_inst = ""
+            product_ref_inst = "Use image 1 as the exact product reference."
 
         prompt = f"""
 CRITICAL GARMENT FIDELITY MODE
@@ -352,9 +380,11 @@ The generated garment must be visually identical to the source garment.
 Only change: model pose, background, camera angle.
 Do not change the garment itself.
 
+{model_ref_inst}
+
 {model_profile_block}
 
-Use image 2 as the exact product reference.
+{product_ref_inst}
 
 {article_context_block}
 
@@ -392,4 +422,54 @@ No overly smooth AI face.
 No beauty retouching.
 No fantasy fashion campaign.
 """.strip()
+        return GPTPromptBuilder.clean_cinematic_wording(prompt)
+
+    @staticmethod
+    def build_detail_prompt(garment_json: dict[str, Any], detail_type: str, style: str) -> str:
+        category = "other"
+        payload = json.dumps(garment_json, ensure_ascii=False).lower()
+        if "denim" in payload or "jeans" in payload or "джин" in payload:
+            category = "denim"
+        elif any(kw in payload for kw in ["jacket", "coat", "куртк", "khoác"]):
+            category = "jacket"
+        elif any(kw in payload for kw in ["dress", "gown", "плать", "váy"]):
+            category = "dress"
+        elif any(kw in payload for kw in ["shirt", "рубаш", "sơ mi", "t-shirt", "tshirt"]):
+            category = "shirt"
+
+        priorities = []
+        if category == "denim":
+            priorities = ["distressing", "ripped areas", "wash pattern", "rhinestones", "studs"]
+        elif category == "shirt":
+            priorities = ["collar", "buttons", "embroidery", "logo"]
+        elif category == "jacket":
+            priorities = ["zipper", "pockets", "stitching", "logo"]
+        elif category == "dress":
+            priorities = ["fabric texture", "waist details", "embellishments"]
+
+        detail_type_lower = detail_type.lower().strip()
+        if detail_type_lower == "fabric_detail":
+            focus_instr = "Extreme close-up shot focusing on fabric texture, stitching, seams, distressing, and wash effects."
+        elif detail_type_lower == "logo_detail":
+            focus_instr = "Extreme close-up shot focusing on logos, labels, embroidery, rhinestones, and embellishments."
+        else:
+            focus_instr = "Close-up shot focusing on product details: fabric, texture, logo, zipper, buttons, embroidery, rhinestones, and distressing."
+
+        if priorities:
+            focus_instr += f"\nSpecifically, prioritize showing: {', '.join(priorities)}."
+
+        prompt = (
+            "Create a professional ecommerce garment detail shot using the uploaded product reference.\n\n"
+            f"{focus_instr}\n\n"
+            "Focus tightly on the product. The image must show ONLY the garment itself, laid flat or as a close-up, with NO model, NO human body, NO head, hands, or limbs visible.\n\n"
+            "Preserve exact product color, fabric texture, logo/text, seams, pockets and closures.\n\n"
+            "Clean studio background.\n\n"
+            "Do not change the product design.\n\n"
+            "Do not invent new text or logos.\n\n"
+            "The image must look like a real ecommerce product photograph taken with a real camera.\n"
+            "No CGI.\n"
+            "No 3D render.\n"
+            "No cartoon.\n"
+            "No illustration."
+        )
         return GPTPromptBuilder.clean_cinematic_wording(prompt)
