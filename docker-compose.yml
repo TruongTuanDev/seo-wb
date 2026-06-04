@@ -1,0 +1,116 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: seo_wb_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-12345678}
+    ports:
+      - "5439:5432" # Map PostgreSQL to 5439 to avoid conflict with local postgres (5432)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d seo_wb_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./seo-wb-backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8081:8000" # Map backend to 8081 to avoid conflict with port 8000
+    env_file:
+      - ./seo-wb-backend/.env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
+    volumes:
+      - ./seo-wb-backend/storage:/app/storage
+    command: sh -c "python ./scripts/migrate.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./seo-wb-backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.image_generation_worker"]
+    env_file:
+      - ./seo-wb-backend/.env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
+    volumes:
+      - ./seo-wb-backend/storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  finance-worker:
+    build:
+      context: ./seo-wb-backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.finance_auto_sync_worker"]
+    env_file:
+      - ./seo-wb-backend/.env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  finance-scheduler:
+    build:
+      context: ./seo-wb-backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.finance_nightly_scheduler"]
+    env_file:
+      - ./seo-wb-backend/.env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  usage-reset-scheduler:
+    build:
+      context: ./seo-wb-backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.usage_reset_scheduler"]
+    env_file:
+      - ./seo-wb-backend/.env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  frontend:
+    build:
+      context: ./seo-wb-frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8081/api/v1
+    restart: unless-stopped
+    ports:
+      - "3030:3000" # Map frontend to 3030 to avoid conflict with port 3000
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8081/api/v1
+
+volumes:
+  postgres_data:
