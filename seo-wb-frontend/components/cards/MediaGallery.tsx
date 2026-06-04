@@ -168,10 +168,11 @@ export interface RecommendationPayload {
   recommendedBackground?: string;
 }
 
-const SUPPORTED_CATALOG_QUANTITIES = [3, 5, 6] as const;
+const SUPPORTED_CATALOG_QUANTITIES = [1, 3, 5, 6] as const;
 const MAX_UPLOAD_IMAGE_BYTES = 10 * 1024 * 1024;
 
-function normalizeCatalogQuantity(quantity: number): 3 | 5 | 6 {
+function normalizeCatalogQuantity(quantity: number): 1 | 3 | 5 | 6 {
+  if (quantity <= 1) return 1;
   if (quantity <= 3) return 3;
   if (quantity <= 5) return 5;
   return 6;
@@ -1094,6 +1095,7 @@ export function MediaGallery({
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
                     <div className="font-semibold text-zinc-900">Pose Bundle Preview</div>
                     <div className="mt-1 leading-relaxed">
+                      {quantity === 1 && "Front catalog view."}
                       {quantity === 3 && "Front catalog, side 45 catalog, hand on hip catalog."}
                       {quantity === 5 && `Front catalog, side 45 catalog, walking lifestyle, ${backImage ? "back view" : "detail shot"}, hand on hip catalog.`}
                       {quantity === 6 && `Front catalog, side 45 catalog, walking lifestyle, ${backImage ? "back view" : "detail shot"}, hand on hip catalog, sitting lifestyle.`}
@@ -1112,7 +1114,7 @@ export function MediaGallery({
             <>
               <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
                 <label className="mb-2 block text-sm font-medium text-zinc-800">Generated images</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   {SUPPORTED_CATALOG_QUANTITIES.map((qty) => (
                     <button
                       key={qty}
@@ -1124,7 +1126,7 @@ export function MediaGallery({
                           : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
                       }`}
                     >
-                      {qty} Images
+                      {qty} {qty === 1 ? "Image" : "Images"}
                     </button>
                   ))}
                 </div>

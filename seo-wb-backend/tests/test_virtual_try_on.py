@@ -582,6 +582,20 @@ async def test_simplified_workflow_quantities(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "is_dir", mock_is_dir)
     monkeypatch.setattr(Path, "exists", mock_exists)
     
+    # 0. Test quantity 1
+    tasks_1 = build_simplified_catalog_tasks(
+        model_id="model_1",
+        quantity=1,
+        selected_style="studio",
+        has_back_image=True,
+        front_data_uri="front_uri",
+        back_data_uri="back_uri",
+        model_metadata={"availablePoses": ["front", "side_45", "walking"]}
+    )
+    assert len(tasks_1) == 1
+    assert tasks_1[0]["label"] == "Front Catalog"
+    assert tasks_1[0]["type"] == "vton_raw"
+
     # 1. Test quantity 3
     tasks_3 = build_simplified_catalog_tasks(
         model_id="model_1",

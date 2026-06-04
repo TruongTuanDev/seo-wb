@@ -123,6 +123,12 @@ def test_garment_validator_failures():
 
 
 def test_build_tasks_quantity_rules():
+    tasks_1 = GPTImageCatalogService.build_tasks(1, has_back_image=True)
+    assert len(tasks_1) == 1
+    assert tasks_1[0]["pose"] == "front"
+    assert tasks_1[0]["label"] == "Front Catalog"
+    assert tasks_1[0]["output_type"] == "catalog"
+
     tasks_3 = GPTImageCatalogService.build_tasks(3, has_back_image=True)
     assert len(tasks_3) == 3
     assert [task["pose"] for task in tasks_3] == ["front", "side_45", "hand_on_hip"]

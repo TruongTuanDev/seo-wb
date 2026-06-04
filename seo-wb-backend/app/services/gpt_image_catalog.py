@@ -516,7 +516,10 @@ class GPTImageCatalogService:
                 "validation_pose": None,
             }
         )
-
+        if quantity == 1:
+            return [
+                {"pose": "front", "type": "catalog", "label": "Front Catalog", "output_type": "catalog", "validation_pose": "front"},
+            ]
         if quantity == 3:
             return [
                 {"pose": "front", "type": "catalog", "label": "Front Catalog", "output_type": "catalog", "validation_pose": "front"},

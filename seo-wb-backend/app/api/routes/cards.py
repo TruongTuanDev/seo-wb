@@ -99,6 +99,8 @@ def _normalize_generation_quantity(quantity: int, runtime_config: dict[str, Any]
 
 
 def _normalize_catalog_bundle_quantity(quantity: int) -> int:
+    if quantity <= 1:
+        return 1
     if quantity <= 3:
         return 3
     if quantity <= 5:

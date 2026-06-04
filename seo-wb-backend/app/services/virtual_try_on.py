@@ -389,12 +389,21 @@ def build_simplified_catalog_tasks(
             fallback_p = Path("storage/models") / model_id / "front.png"
         if not fallback_p.exists():
             fallback_p = Path("storage/models") / "model1.png"
-        return fallback_p
-
     tasks = []
     
     # We build based on quantity (3, 5, 8)
-    if quantity == 3:
+    if quantity == 1:
+        # 1. Front Catalog
+        front_path = get_model_path_for_pose("front")
+        tasks.append({
+            "type": "vton_raw",
+            "pose": "front",
+            "human_path": front_path,
+            "garment_url": front_data_uri,
+            "label": "Front Catalog",
+            "style_key": "none"
+        })
+    elif quantity == 3:
         # 1. Front Catalog
         front_path = get_model_path_for_pose("front")
         tasks.append({
