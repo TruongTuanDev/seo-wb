@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ImageDropzone } from "@/components/cards/ImageDropzone";
 import { Characteristic } from "@/components/cards/CharacteristicsEditor";
 import { SizeRow } from "@/components/cards/SizeTable";
 import { ImageGenerationStatus, MediaGallery, RecommendationPayload } from "@/components/cards/MediaGallery";
@@ -19,7 +18,7 @@ import { useCardForm } from "@/hooks/useCardForm";
 import { useDraftAutosave } from "@/hooks/useDraftAutosave";
 import { useJobStatus } from "@/hooks/useJobStatus";
 import { API_BASE, api } from "@/lib/api";
-import { ArrowRight, ArrowLeft, RefreshCw, CheckCircle, UploadCloud } from "lucide-react";
+import { ArrowRight, ArrowLeft, RefreshCw, CheckCircle, UploadCloud, ImagePlus, X } from "lucide-react";
 
 type CreationMode = "create_new" | "add_to_existing_imt" | "create_then_merge";
 
@@ -204,6 +203,72 @@ function findCharacteristicValue(characteristics: Characteristic[], names: strin
   const normalizedNames = names.map(normalizeCharcName);
   const item = characteristics.find((charc) => normalizedNames.includes(normalizeCharcName(charc.name)));
   return item ? valueText(item.value) : "";
+}
+
+function ReferenceImageInput({
+  label,
+  required,
+  file,
+  onChange,
+  onRemove,
+}: {
+  label: string;
+  required?: boolean;
+  file: File | null;
+  onChange: (file: File | null) => void;
+  onRemove: () => void;
+}) {
+  const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+
+  useEffect(() => {
+    if (!previewUrl) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  return (
+    <label className="group relative flex min-h-48 cursor-pointer flex-col overflow-hidden rounded-xl border border-dashed border-zinc-300 bg-white transition-colors hover:border-brand hover:bg-indigo-50/30">
+      {previewUrl ? (
+        <div className="relative h-40 w-full bg-zinc-100">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={previewUrl} alt={label} className="h-full w-full object-contain p-2" />
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onRemove();
+            }}
+            className="absolute right-2 top-2 rounded-full bg-rose-600 p-1.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ) : (
+        <div className="flex h-40 flex-col items-center justify-center p-4 text-center text-zinc-500">
+          <ImagePlus size={28} className="mb-3" />
+          <span className="text-sm font-medium">{label}</span>
+          <span className="mt-1 text-xs">JPG, PNG, WEBP</span>
+        </div>
+      )}
+      <div className="flex min-h-16 flex-col justify-center px-4 py-3">
+        <span className="text-sm font-medium text-zinc-900">
+          {label} {required && <span className="text-brand">*</span>}
+        </span>
+        <span className="mt-1 line-clamp-1 text-xs text-zinc-500">
+          {file ? file.name : required ? "Required for analysis and generation" : "Optional back reference"}
+        </span>
+      </div>
+      <input
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={(event) => {
+          onChange(event.target.files?.[0] || null);
+          event.target.value = "";
+        }}
+      />
+    </label>
+  );
 }
 
 export function CreateCardClient() {
@@ -517,6 +582,24 @@ export function CreateCardClient() {
   };
 
   const effectiveBrand = () => brand.trim() || "Нет бренда";
+  const frontImage = images[0] || null;
+  const backImage = images[1] || null;
+
+  const setReferenceImage = (index: 0 | 1, file: File | null) => {
+    setImages((current) => {
+      const next = [...current];
+      if (file) {
+        next[index] = file;
+      } else {
+        next.splice(index, 1);
+      }
+      return next.filter(Boolean).slice(0, 2);
+    });
+  };
+
+  const removeReferenceImage = (index: 0 | 1) => {
+    setImages((current) => current.filter((_, imageIndex) => imageIndex !== index));
+  };
 
   const buildVariantPayload = (variant: VariantCardState = activeVariant) => ({
     vendorCode: variant.vendorCode.trim(),
@@ -973,7 +1056,24 @@ export function CreateCardClient() {
                 <UploadCloud className="text-brand" size={20} /> Product Images
               </h2>
             </div>
-            <ImageDropzone files={images} onChange={setImages} maxFiles={2} />
+            <div className="grid gap-4">
+              <ReferenceImageInput
+                label="Front Product Image"
+                required
+                file={frontImage}
+                onChange={(file) => setReferenceImage(0, file)}
+                onRemove={() => removeReferenceImage(0)}
+              />
+              <ReferenceImageInput
+                label="Back Product Image"
+                file={backImage}
+                onChange={(file) => setReferenceImage(1, file)}
+                onRemove={() => removeReferenceImage(1)}
+              />
+            </div>
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+              Front image is used as the main garment reference. Back image is optional and enables back-view generations.
+            </div>
           </div>
         </aside>
 
