@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, startTransition, useEffect, useState } from "react";
+import { ChangeEvent, startTransition, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { AdminShell } from "@/components/admin/AdminShell";
@@ -66,11 +66,21 @@ const getImageUrl = (url: string | null | undefined) => {
 };
 
 function ModelCard({ model, onEdit, onDelete }: { model: ModelTemplate; onEdit: (model: ModelTemplate) => void; onDelete: (id: string) => void }) {
-  const [activeImage, setActiveImage] = useState<string | null>(model.reference_image_url || null);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const availableImages = useMemo(() => {
+    const images = [
+      model.reference_image_url,
+      ...Object.values(model.poses || {}),
+    ].filter((value): value is string => Boolean(value));
+    return Array.from(new Set(images));
+  }, [model.poses, model.reference_image_url]);
 
-  useEffect(() => {
-    setActiveImage(model.reference_image_url || null);
-  }, [model.reference_image_url]);
+  const activeImage = useMemo(() => {
+    if (selectedImage && availableImages.includes(selectedImage)) {
+      return selectedImage;
+    }
+    return model.reference_image_url || availableImages[0] || null;
+  }, [availableImages, model.reference_image_url, selectedImage]);
 
   return (
     <article className="rounded-[24px] border border-stone-200 bg-white p-5 flex flex-col justify-between">
@@ -93,7 +103,7 @@ function ModelCard({ model, onEdit, onDelete }: { model: ModelTemplate; onEdit: 
             {model.reference_image_url && (
               <button
                 type="button"
-                onClick={() => setActiveImage(model.reference_image_url || null)}
+                onClick={() => setSelectedImage(model.reference_image_url || null)}
                 className={`relative h-12 w-12 flex-shrink-0 rounded-lg overflow-hidden border transition-all ${
                   activeImage === model.reference_image_url ? "border-indigo-600 ring-2 ring-indigo-100" : "border-stone-200"
                 }`}
@@ -112,7 +122,7 @@ function ModelCard({ model, onEdit, onDelete }: { model: ModelTemplate; onEdit: 
                 <button
                   key={poseName}
                   type="button"
-                  onClick={() => setActiveImage(url)}
+                  onClick={() => setSelectedImage(url)}
                   className={`relative h-12 w-12 flex-shrink-0 rounded-lg overflow-hidden border transition-all ${
                     activeImage === url ? "border-indigo-600 ring-2 ring-indigo-100" : "border-stone-200"
                   }`}

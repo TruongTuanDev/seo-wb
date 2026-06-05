@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import { GripVertical, ImagePlus, Loader2, WandSparkles, X } from "lucide-react";
 import { FilePreviewImage } from "@/components/cards/FilePreviewImage";
 import type { VariantCardState } from "@/components/cards/types";
@@ -288,6 +288,16 @@ export function MediaGallery({
     ? models.filter((m) => m.garmentType === mappedGarmentType || m.garmentType === "full_body")
     : models;
   const modelsToRender = displayModels.length > 0 ? displayModels : models;
+  const effectiveSelectedModel = useMemo(() => {
+    if (selectedModelId && selectedModelId !== "none") {
+      const matchedModel = modelsToRender.find((model) => model.id === selectedModelId);
+      if (matchedModel) {
+        return matchedModel;
+      }
+    }
+    return modelsToRender[0] ?? null;
+  }, [modelsToRender, selectedModelId]);
+  const effectiveSelectedModelId = effectiveSelectedModel?.id ?? "";
 
   const [garmentJson, setGarmentJson] = useState<GarmentJsonPayload | null>(null);
   const [isFetchingGarment, setIsFetchingGarment] = useState(false);
@@ -329,15 +339,6 @@ export function MediaGallery({
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (isModalOpen && modelsToRender.length > 0) {
-      const isSelectedValid = modelsToRender.some((m) => m.id === selectedModelId);
-      if (!isSelectedValid) {
-        setSelectedModelId(modelsToRender[0].id);
-      }
-    }
-  }, [isModalOpen, modelsToRender, selectedModelId]);
 
   useEffect(() => {
     if (!isModalOpen || !draftId) return;
@@ -472,7 +473,7 @@ export function MediaGallery({
   const isFemaleProd = productGender.includes("жен") || productGender.includes("fem") || productGender.includes("girl") || productGender.includes("woman");
   const isMaleProd = productGender.includes("муж") || productGender.includes("маск") || productGender.includes("boy") || productGender.includes("man");
 
-  const selectedModel = models.find((m) => m.id === selectedModelId);
+  const selectedModel = effectiveSelectedModel;
   const isGenderMismatch = selectedModel && (
     (selectedModel.gender.toLowerCase() === "female" && isMaleProd) ||
     (selectedModel.gender.toLowerCase() === "male" && isFemaleProd)
@@ -594,7 +595,7 @@ export function MediaGallery({
         autoGenerateModel: true,
       });
     } else {
-      if (!selectedModelId || selectedModelId === "none") {
+      if (!effectiveSelectedModel) {
         setValidationError("Please select a real model reference before generating catalog images.");
         return;
       }
@@ -602,7 +603,7 @@ export function MediaGallery({
         setValidationError("Only JPG, PNG, or WEBP images are supported.");
         return;
       }
-      const chosenModel = models.find((m) => m.id === selectedModelId);
+      const chosenModel = effectiveSelectedModel;
       if (!chosenModel) {
         setValidationError("Please select a real model reference before generating catalog images.");
         return;
@@ -610,7 +611,7 @@ export function MediaGallery({
       onGenerateImages({
         frontImage,
         backImage: backImage || undefined,
-        modelId: selectedModelId,
+        modelId: chosenModel.id,
         selectedModelImageUrl: chosenModel.frontImageUrl,
         selectedModelGender: chosenModel.gender,
         selectedModelBodyType: chosenModel.bodyType,
@@ -1028,7 +1029,7 @@ export function MediaGallery({
                         </div>
                       )}
                       <ModelSelector
-                        selectedModelId={selectedModelId}
+                        selectedModelId={effectiveSelectedModelId}
                         models={modelsToRender}
                         onSelectModel={(model) => {
                           setSelectedModelId(model.id);
