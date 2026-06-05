@@ -280,6 +280,7 @@ export function MediaGallery({
   const [customModelImage, setCustomModelImage] = useState<File | null>(null);
   const [modelSource, setModelSource] = useState<"template" | "upload" | "ai">("template");
   const [isExporting, setIsExporting] = useState<Record<string, boolean>>({});
+  const [isEditingReferences, setIsEditingReferences] = useState(false);
   const [models, setModels] = useState<RuntimeModelTemplate[]>([]);
   const [modelsLoadError, setModelsLoadError] = useState("");
 
@@ -553,6 +554,7 @@ export function MediaGallery({
 
   const selectProductReference = (fileList: FileList | null, setter: (file: File | null) => void) => {
     setGarmentJson(null);
+    setIsEditingReferences(true);
     selectFile(fileList, setter);
   };
 
@@ -676,7 +678,9 @@ export function MediaGallery({
           <div>
             <div className="text-sm font-semibold text-zinc-950">Product references</div>
             <div className="mt-1 text-xs text-zinc-500">
-              Upload front and back product photos here first. These references are reused later in the generate flow.
+              {frontImage
+                ? "These references were carried over from Inputs and will be reused for image generation."
+                : "Upload front and back product photos here first. These references are reused later in the generate flow."}
             </div>
           </div>
           <span
@@ -689,24 +693,59 @@ export function MediaGallery({
             {garmentJson ? "Analyzed" : "Waiting for analysis"}
           </span>
         </div>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <ImageInput label="Front Product Image *" required file={frontImage} onChange={(files) => selectProductReference(files, setFrontImage)} />
-          <ImageInput label="Back Product Image (Optional)" file={backImage} onChange={(files) => selectProductReference(files, setBackImage)} />
-        </div>
+        {frontImage && !isEditingReferences ? (
+          <div className="mt-4 space-y-3">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-lg border border-zinc-200 bg-white p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Front</div>
+                <div className="mt-2 relative h-32 w-full overflow-hidden rounded-md bg-zinc-100">
+                  <FilePreviewImage file={frontImage} className="h-full w-full object-contain p-1" alt="Front product reference" />
+                </div>
+                <div className="mt-2 line-clamp-1 text-xs text-zinc-500">{frontImage.name}</div>
+              </div>
+              <div className="rounded-lg border border-zinc-200 bg-white p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Back</div>
+                <div className="mt-2 relative h-32 w-full overflow-hidden rounded-md bg-zinc-100">
+                  {backImage ? (
+                    <FilePreviewImage file={backImage} className="h-full w-full object-contain p-1" alt="Back product reference" />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-zinc-400">Optional</div>
+                  )}
+                </div>
+                <div className="mt-2 line-clamp-1 text-xs text-zinc-500">{backImage?.name || "No back image uploaded"}</div>
+              </div>
+            </div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+              Using the product references you uploaded in Inputs. You do not need to upload them again here.
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <ImageInput label="Front Product Image *" required file={frontImage} onChange={(files) => selectProductReference(files, setFrontImage)} />
+            <ImageInput label="Back Product Image (Optional)" file={backImage} onChange={(files) => selectProductReference(files, setBackImage)} />
+          </div>
+        )}
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-zinc-500">
             {frontImage ? `Front: ${frontImage.name}` : "Front image is required before generate."}
             {backImage ? ` Back: ${backImage.name}` : " Back image is optional."}
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleAnalyzeGarment}
-            isLoading={isAnalyzingGarment || isFetchingGarment}
-            disabled={!frontImage}
-          >
-            {garmentJson ? "Re-analyze product" : "Analyze product garment"}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {frontImage ? (
+              <Button type="button" variant="outline" onClick={() => setIsEditingReferences((current) => !current)}>
+                {isEditingReferences ? "Keep current references" : "Replace references"}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleAnalyzeGarment}
+              isLoading={isAnalyzingGarment || isFetchingGarment}
+              disabled={!frontImage}
+            >
+              {garmentJson ? "Re-analyze product" : "Analyze product garment"}
+            </Button>
+          </div>
         </div>
       </div>
 
