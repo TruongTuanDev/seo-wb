@@ -283,6 +283,10 @@ export function MediaGallery({
   const [isEditingReferences, setIsEditingReferences] = useState(false);
   const [models, setModels] = useState<RuntimeModelTemplate[]>([]);
   const [modelsLoadError, setModelsLoadError] = useState("");
+  const inheritedFrontImage = variant?.images[0] ?? null;
+  const inheritedBackImage = variant?.images[1] ?? null;
+  const effectiveFrontImage = frontImage ?? inheritedFrontImage;
+  const effectiveBackImage = backImage ?? inheritedBackImage;
 
   const mappedGarmentType = getModelGarmentType(productCategory);
   const displayModels = mappedGarmentType
@@ -368,7 +372,7 @@ export function MediaGallery({
     };
   }, [isModalOpen, draftId]);
   const handleAnalyzeGarment = async () => {
-    if (!frontImage) {
+    if (!effectiveFrontImage) {
       setValidationError("Front product image is required.");
       return;
     }
@@ -376,9 +380,9 @@ export function MediaGallery({
     setValidationError("");
     try {
       const formData = new FormData();
-      formData.append("front_image", frontImage);
-      if (backImage) {
-        formData.append("back_image", backImage);
+      formData.append("front_image", effectiveFrontImage);
+      if (effectiveBackImage) {
+        formData.append("back_image", effectiveBackImage);
       }
       formData.append("category", productCategory);
       formData.append("title", variant?.title || "");
@@ -559,7 +563,7 @@ export function MediaGallery({
   };
 
   const submit = () => {
-    if (!frontImage) {
+    if (!effectiveFrontImage) {
       setValidationError("Front product image is required.");
       return;
     }
@@ -568,13 +572,13 @@ export function MediaGallery({
         setValidationError("Please upload a model reference image.");
         return;
       }
-      if (!validateImage(frontImage) || (backImage && !validateImage(backImage)) || !validateImage(customModelImage)) {
+      if (!validateImage(effectiveFrontImage) || (effectiveBackImage && !validateImage(effectiveBackImage)) || !validateImage(customModelImage)) {
         setValidationError("Only JPG, PNG, or WEBP images are supported.");
         return;
       }
       onGenerateImages({
-        frontImage,
-        backImage: backImage || undefined,
+        frontImage: effectiveFrontImage,
+        backImage: effectiveBackImage || undefined,
         modelImage: customModelImage,
         modelId: "none",
         backgroundStyle,
@@ -585,13 +589,13 @@ export function MediaGallery({
         autoGenerateModel: false,
       });
     } else if (modelSource === "ai") {
-      if (!validateImage(frontImage) || (backImage && !validateImage(backImage))) {
+      if (!validateImage(effectiveFrontImage) || (effectiveBackImage && !validateImage(effectiveBackImage))) {
         setValidationError("Only JPG, PNG, or WEBP images are supported.");
         return;
       }
       onGenerateImages({
-        frontImage,
-        backImage: backImage || undefined,
+        frontImage: effectiveFrontImage,
+        backImage: effectiveBackImage || undefined,
         modelId: "auto_russian_model",
         selectedModelGender: recommendations?.recommendedModelGender || productGenderText.toLowerCase(),
         selectedModelBodyType: recommendations?.recommendedBodyType || "",
@@ -607,7 +611,7 @@ export function MediaGallery({
         setValidationError("Please select a real model reference before generating catalog images.");
         return;
       }
-      if (!validateImage(frontImage) || (backImage && !validateImage(backImage))) {
+      if (!validateImage(effectiveFrontImage) || (effectiveBackImage && !validateImage(effectiveBackImage))) {
         setValidationError("Only JPG, PNG, or WEBP images are supported.");
         return;
       }
@@ -617,8 +621,8 @@ export function MediaGallery({
         return;
       }
       onGenerateImages({
-        frontImage,
-        backImage: backImage || undefined,
+        frontImage: effectiveFrontImage,
+        backImage: effectiveBackImage || undefined,
         modelId: chosenModel.id,
         selectedModelImageUrl: chosenModel.frontImageUrl,
         selectedModelGender: chosenModel.gender,
@@ -679,6 +683,7 @@ export function MediaGallery({
             <div className="text-sm font-semibold text-zinc-950">Product references</div>
             <div className="mt-1 text-xs text-zinc-500">
               {frontImage
+                || inheritedFrontImage
                 ? "These references were carried over from Inputs and will be reused for image generation."
                 : "Upload front and back product photos here first. These references are reused later in the generate flow."}
             </div>
@@ -693,26 +698,26 @@ export function MediaGallery({
             {garmentJson ? "Analyzed" : "Waiting for analysis"}
           </span>
         </div>
-        {frontImage && !isEditingReferences ? (
+        {effectiveFrontImage && !isEditingReferences ? (
           <div className="mt-4 space-y-3">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="rounded-lg border border-zinc-200 bg-white p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Front</div>
                 <div className="mt-2 relative h-32 w-full overflow-hidden rounded-md bg-zinc-100">
-                  <FilePreviewImage file={frontImage} className="h-full w-full object-contain p-1" alt="Front product reference" />
+                  <FilePreviewImage file={effectiveFrontImage} className="h-full w-full object-contain p-1" alt="Front product reference" />
                 </div>
-                <div className="mt-2 line-clamp-1 text-xs text-zinc-500">{frontImage.name}</div>
+                <div className="mt-2 line-clamp-1 text-xs text-zinc-500">{effectiveFrontImage.name}</div>
               </div>
               <div className="rounded-lg border border-zinc-200 bg-white p-3">
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Back</div>
                 <div className="mt-2 relative h-32 w-full overflow-hidden rounded-md bg-zinc-100">
-                  {backImage ? (
-                    <FilePreviewImage file={backImage} className="h-full w-full object-contain p-1" alt="Back product reference" />
+                  {effectiveBackImage ? (
+                    <FilePreviewImage file={effectiveBackImage} className="h-full w-full object-contain p-1" alt="Back product reference" />
                   ) : (
                     <div className="flex h-full items-center justify-center text-xs text-zinc-400">Optional</div>
                   )}
                 </div>
-                <div className="mt-2 line-clamp-1 text-xs text-zinc-500">{backImage?.name || "No back image uploaded"}</div>
+                <div className="mt-2 line-clamp-1 text-xs text-zinc-500">{effectiveBackImage?.name || "No back image uploaded"}</div>
               </div>
             </div>
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
@@ -727,11 +732,11 @@ export function MediaGallery({
         )}
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-zinc-500">
-            {frontImage ? `Front: ${frontImage.name}` : "Front image is required before generate."}
-            {backImage ? ` Back: ${backImage.name}` : " Back image is optional."}
+            {effectiveFrontImage ? `Front: ${effectiveFrontImage.name}` : "Front image is required before generate."}
+            {effectiveBackImage ? ` Back: ${effectiveBackImage.name}` : " Back image is optional."}
           </div>
           <div className="flex flex-wrap gap-2">
-            {frontImage ? (
+            {effectiveFrontImage ? (
               <Button type="button" variant="outline" onClick={() => setIsEditingReferences((current) => !current)}>
                 {isEditingReferences ? "Keep current references" : "Replace references"}
               </Button>
@@ -741,7 +746,7 @@ export function MediaGallery({
               variant="outline"
               onClick={handleAnalyzeGarment}
               isLoading={isAnalyzingGarment || isFetchingGarment}
-              disabled={!frontImage}
+              disabled={!effectiveFrontImage}
             >
               {garmentJson ? "Re-analyze product" : "Analyze product garment"}
             </Button>
@@ -1224,10 +1229,10 @@ export function MediaGallery({
                     <div className="font-semibold text-zinc-900">Pose Bundle Preview</div>
                     <div className="mt-1 leading-relaxed">
                       {quantity === 3 && (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Back (waist-down)" : "Front, Side, Back")}
-                      {quantity === 6 && (backImage 
+                      {quantity === 6 && (effectiveBackImage 
                         ? (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Back (waist-down), Lifestyle, Detail, Banner" : "Front, Side, Back, Lifestyle, Detail, Banner")
                         : (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Lifestyle, Detail, Extra Detail, Banner" : "Front, Side, Lifestyle, Detail, Extra Detail, Banner"))}
-                      {quantity === 9 && (backImage 
+                      {quantity === 9 && (effectiveBackImage 
                         ? (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Back (waist-down), Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Banner" : "Front, Side, Back, Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Banner")
                         : (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Product Detail, Banner" : "Front, Side, Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Product Detail, Banner"))}
                     </div>
@@ -1238,7 +1243,7 @@ export function MediaGallery({
                         </span>
                       )}
                       Back view is generated only when a back product image is uploaded.
-                      {!backImage && quantity > 3 && (
+                      {!effectiveBackImage && quantity > 3 && (
                         <span className="block mt-0.5 text-amber-600 font-medium">
                           Note: Back view will be replaced by {quantity === 6 ? "Extra Detail" : "Product Detail"} shot.
                         </span>
