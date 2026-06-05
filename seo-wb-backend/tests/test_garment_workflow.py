@@ -63,7 +63,22 @@ def test_gpt_prompt_builder():
     assert "Do not recolor the garment." in prompt
     assert "#BFD4E8" in prompt
     assert "rhinestones" in prompt
-    assert "waist down" in prompt.lower()
+
+    front_prompt = GPTPromptBuilder.build_prompt(
+        garment_json,
+        "studio",
+        "front",
+        output_type="catalog",
+    )
+    assert "waist down" in front_prompt.lower()
+
+    side_prompt = GPTPromptBuilder.build_prompt(
+        garment_json,
+        "studio",
+        "side_45",
+        output_type="catalog",
+    )
+    assert "waist down" in side_prompt.lower()
 
     # Retry Prompt (Strict Garment Preservation Mode)
     strict_prompt = GPTPromptBuilder.build_prompt(
