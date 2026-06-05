@@ -118,6 +118,21 @@ class ProductIntentParser:
         return ProductIntentParser.vendor_suffix_from_color(value)
 
     @staticmethod
+    def display_value_from_color(value: str) -> str:
+        normalized = ProductIntentParser._normalize_text(value)
+        for token, (ru_value, _) in COLOR_MAP.items():
+            if normalized == ProductIntentParser._normalize_text(token):
+                cleaned = ru_value.replace("ё", "е").strip()
+                return cleaned[:1].upper() + cleaned[1:] if cleaned else "Цвет"
+
+        cleaned = str(value or "").replace("/", " ").replace("\\", " ").strip()
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        cleaned = re.sub(r"[^\w\s\-]+", "", cleaned, flags=re.UNICODE).strip(" _-")
+        if not cleaned:
+            return "Цвет"
+        return cleaned[:1].upper() + cleaned[1:]
+
+    @staticmethod
     def vendor_suffix_from_color(value: str) -> str:
         translit = {
             "а": "a",

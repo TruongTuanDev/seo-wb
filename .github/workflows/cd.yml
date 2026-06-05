@@ -43,8 +43,12 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            exit 1
           fi
+
+      - name: Skip deploy until secrets are configured
+        if: steps.deploy_secrets.outputs.configured != 'true'
+        run: |
+          echo "CD skipped: required GitHub Secrets are not configured yet."
 
       - name: Configure SSH
         if: steps.deploy_secrets.outputs.configured == 'true'

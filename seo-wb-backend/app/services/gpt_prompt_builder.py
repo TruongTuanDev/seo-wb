@@ -28,6 +28,30 @@ POSES = {
 
 class GPTPromptBuilder:
     @staticmethod
+    def _pose_instruction(garment_json: dict[str, Any], pose: str, output_type: str = "catalog") -> str:
+        pose_key = pose.lower().strip()
+        default_pose = POSES.get(pose_key, POSES["front"])
+        garment_area = str(garment_json.get("garment_area") or "upper_body").lower().strip()
+        if garment_area != "lower_body" or output_type != "catalog":
+            return default_pose
+
+        lower_body_crops = {
+            "front": (
+                "Front-facing catalog pose. Keep the same front pose direction, but frame the image from approximately "
+                "the waist down so the waistband, hips, legs, silhouette, and hem of the lower-body garment stay dominant."
+            ),
+            "side_45": (
+                "45-degree side catalog pose. Keep the same side pose direction, but frame the image from approximately "
+                "the waist down so the waistband, hip line, side silhouette, leg line, and hem of the lower-body garment stay dominant."
+            ),
+            "back": (
+                "Back-facing catalog pose. Keep the same back pose direction, but frame the image from approximately "
+                "the waist down so the back waistband, seat, leg line, rear silhouette, and hem of the lower-body garment stay dominant."
+            ),
+        }
+        return lower_body_crops.get(pose_key, default_pose)
+
+    @staticmethod
     def _article_context_block(garment_json: dict[str, Any]) -> str:
         source_title = str(garment_json.get("source_title") or "").strip()
         source_description = str(garment_json.get("source_description") or "").strip()
@@ -119,7 +143,8 @@ The product itself must remain visually identical to the source.
         pose: str,
         strict_retry_fields: list[str] | None = None,
         has_model_reference: bool = True,
-        selected_model_gender: str | None = None
+        selected_model_gender: str | None = None,
+        output_type: str = "catalog",
     ) -> str:
         # Standardize style
         style_key = style.lower().strip()
@@ -128,7 +153,7 @@ The product itself must remain visually identical to the source.
 
         # Standardize pose
         pose_key = pose.lower().strip()
-        pose_desc = POSES.get(pose_key, POSES["front"])
+        pose_desc = GPTPromptBuilder._pose_instruction(garment_json, pose_key, output_type=output_type)
 
         # Base Prompt emphasizing real photography
         if has_model_reference:
@@ -314,7 +339,8 @@ The product itself must remain visually identical to the source.
         style: str,
         pose: str,
         has_model_reference: bool = True,
-        selected_model_gender: str | None = None
+        selected_model_gender: str | None = None,
+        output_type: str = "catalog",
     ) -> str:
         # Standardize style/pose description
         style_key = style.lower().strip()
@@ -322,7 +348,7 @@ The product itself must remain visually identical to the source.
         style_desc = STYLE_OPTIONS.get(style_key, STYLE_OPTIONS["studio"])
 
         pose_key = pose.lower().strip()
-        pose_desc = POSES.get(pose_key, POSES["front"])
+        pose_desc = GPTPromptBuilder._pose_instruction(garment_json, pose_key, output_type=output_type)
 
         product_type = garment_json.get("product_type") or "garment"
         category = garment_json.get("category") or "garment"

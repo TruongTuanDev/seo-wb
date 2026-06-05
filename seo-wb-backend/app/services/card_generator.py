@@ -30,7 +30,7 @@ SYSTEM_PROMPT = (
     "ПРАВИЛА ДЛЯ ВАРИАНТОВ И РАЗМЕРОВ: "
     "- Если extracted_user_intent содержит несколько цветов, создай variant для каждого цвета. "
     "- Размеры S-42 преобразуй в techSize=S и wbSize=42. Одиночный размер S означает techSize=S и wbSize=S. "
-    "- Если есть vendor_code, vendorCode должен быть base/colorCode."
+    "- Если есть vendor_code, vendorCode должен быть base/РусскийЦвет."
 )
 
 
@@ -318,7 +318,8 @@ class CardGenerator:
                 expanded = []
                 for color in intent.colors:
                     variant = json.loads(json.dumps(template, ensure_ascii=False))
-                    variant["vendorCode"] = f"{vendor_base}/{color.code}"
+                    color_suffix = ProductIntentParser.display_value_from_color(color.value)
+                    variant["vendorCode"] = f"{vendor_base}/{color_suffix}"
                     variant["brand"] = cls._brand(user_input)
                     variant["sizes"] = sizes
                     variant["dimensions"] = dimensions

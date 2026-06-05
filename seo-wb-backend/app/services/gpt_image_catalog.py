@@ -402,7 +402,8 @@ class GPTImageCatalogService:
                             style,
                             pose,
                             has_model_reference=has_model_image,
-                            selected_model_gender=metadata.get("selected_model_gender")
+                            selected_model_gender=metadata.get("selected_model_gender"),
+                            output_type=output_type,
                         )
 
                     prompt = GPTPromptBuilder.clean_cinematic_wording(prompt)
@@ -558,7 +559,8 @@ class GPTImageCatalogService:
                             style=style,
                             pose=pose,
                             has_model_reference=has_model_image,
-                            selected_model_gender=metadata.get("selected_model_gender")
+                            selected_model_gender=metadata.get("selected_model_gender"),
+                            output_type=output_type,
                         )
                     else:
                         if garment_json.get("complex_product_mode"):
@@ -574,7 +576,8 @@ class GPTImageCatalogService:
                                 pose,
                                 strict_retry_fields=val_res.get("failed_fields", []),
                                 has_model_reference=has_model_image,
-                                selected_model_gender=metadata.get("selected_model_gender")
+                                selected_model_gender=metadata.get("selected_model_gender"),
+                                output_type=output_type,
                             )
 
                     retry_prompt = GPTPromptBuilder.clean_cinematic_wording(retry_prompt)

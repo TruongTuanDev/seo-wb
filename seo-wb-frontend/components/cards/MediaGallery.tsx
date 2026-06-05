@@ -483,6 +483,7 @@ export function MediaGallery({
   const modelGenderText = selectedModel ? selectedModel.gender : "";
   const isGenerating = generationStatus?.status === "queued" || generationStatus?.status === "processing";
   const isGenerationCompleted = generationStatus?.status === "completed" || generationStatus?.status === "completed_with_warnings";
+  const isLowerBodyProduct = (garmentJson?.garment_area || getGarmentType(productCategory)) === "lower_body";
 
   const handleGeneratedImageAction = async (action: "use_anyway" | "hide" | "approve" | "reject") => {
     if (!draftId || !generationStatus?.id || !selectedGeneratedImage?.image_id) return;
@@ -548,6 +549,11 @@ export function MediaGallery({
     }
     setValidationError("");
     setter(file);
+  };
+
+  const selectProductReference = (fileList: FileList | null, setter: (file: File | null) => void) => {
+    setGarmentJson(null);
+    selectFile(fileList, setter);
   };
 
   const submit = () => {
@@ -662,6 +668,45 @@ export function MediaGallery({
               }}
             />
           </label>
+        </div>
+      </div>
+
+      <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50/70 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold text-zinc-950">Product references</div>
+            <div className="mt-1 text-xs text-zinc-500">
+              Upload front and back product photos here first. These references are reused later in the generate flow.
+            </div>
+          </div>
+          <span
+            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+              garmentJson
+                ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border border-zinc-200 bg-white text-zinc-500"
+            }`}
+          >
+            {garmentJson ? "Analyzed" : "Waiting for analysis"}
+          </span>
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <ImageInput label="Front Product Image *" required file={frontImage} onChange={(files) => selectProductReference(files, setFrontImage)} />
+          <ImageInput label="Back Product Image (Optional)" file={backImage} onChange={(files) => selectProductReference(files, setBackImage)} />
+        </div>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-xs text-zinc-500">
+            {frontImage ? `Front: ${frontImage.name}` : "Front image is required before generate."}
+            {backImage ? ` Back: ${backImage.name}` : " Back image is optional."}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleAnalyzeGarment}
+            isLoading={isAnalyzingGarment || isFetchingGarment}
+            disabled={!frontImage}
+          >
+            {garmentJson ? "Re-analyze product" : "Analyze product garment"}
+          </Button>
         </div>
       </div>
 
@@ -869,9 +914,18 @@ export function MediaGallery({
           <div className="space-y-5">
               {!garmentJson ? (
                 <div className="space-y-4">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <ImageInput label="Front Product Image *" required file={frontImage} onChange={(files) => selectFile(files, setFrontImage)} />
-                    <ImageInput label="Back Product Image (Optional)" file={backImage} onChange={(files) => selectFile(files, setBackImage)} />
+                  <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700">
+                    Upload product references in the Photos panel first, then analyze the garment before generating images.
+                  </div>
+                  <div className="grid gap-3 text-xs text-zinc-600 sm:grid-cols-2">
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <div className="font-semibold text-zinc-800">Front reference</div>
+                      <div className="mt-1">{frontImage?.name || "Not uploaded yet"}</div>
+                    </div>
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <div className="font-semibold text-zinc-800">Back reference</div>
+                      <div className="mt-1">{backImage?.name || "Optional"}</div>
+                    </div>
                   </div>
                   {validationError && (
                     <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 animate-fade-in">
@@ -1130,15 +1184,20 @@ export function MediaGallery({
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
                     <div className="font-semibold text-zinc-900">Pose Bundle Preview</div>
                     <div className="mt-1 leading-relaxed">
-                      {quantity === 3 && "Front, Side, Back"}
+                      {quantity === 3 && (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Back (waist-down)" : "Front, Side, Back")}
                       {quantity === 6 && (backImage 
-                        ? "Front, Side, Back, Lifestyle, Detail, Banner"
-                        : "Front, Side, Lifestyle, Detail, Extra Detail, Banner")}
+                        ? (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Back (waist-down), Lifestyle, Detail, Banner" : "Front, Side, Back, Lifestyle, Detail, Banner")
+                        : (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Lifestyle, Detail, Extra Detail, Banner" : "Front, Side, Lifestyle, Detail, Extra Detail, Banner"))}
                       {quantity === 9 && (backImage 
-                        ? "Front, Side, Back, Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Banner"
-                        : "Front, Side, Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Product Detail, Banner")}
+                        ? (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Back (waist-down), Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Banner" : "Front, Side, Back, Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Banner")
+                        : (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Product Detail, Banner" : "Front, Side, Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Product Detail, Banner"))}
                     </div>
                     <div className="mt-2 text-[11px] text-zinc-500">
+                      {isLowerBodyProduct && (
+                        <span className="block text-zinc-700">
+                          Lower-body products keep the main catalog poses framed from the waist down so the pants or skirt stay dominant.
+                        </span>
+                      )}
                       Back view is generated only when a back product image is uploaded.
                       {!backImage && quantity > 3 && (
                         <span className="block mt-0.5 text-amber-600 font-medium">
