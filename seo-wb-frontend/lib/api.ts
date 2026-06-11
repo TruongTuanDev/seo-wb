@@ -45,7 +45,13 @@ async function fetchWithAuth(url: string, options: ApiOptions = {}) {
       window.location.href = "/login";
     }
     const rawBody = await response.text();
-    let errorMsg = rawBody || response.statusText || "An error occurred";
+    const contentType = response.headers.get("content-type") || "";
+    const isHtmlResponse = contentType.includes("text/html") || /^\s*<!doctype html/i.test(rawBody);
+    const fallbackText = rawBody.trim().replace(/\s+/g, " ");
+    let errorMsg = isHtmlResponse
+      ? `API request failed (${response.status}). The server returned HTML instead of JSON.`
+      : fallbackText.slice(0, 500) || response.statusText || "An error occurred";
+
     try {
       const errorData = JSON.parse(rawBody);
       errorMsg =

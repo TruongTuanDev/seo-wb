@@ -59,7 +59,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               toast.type === "error" && "border-red-600/50",
             )}
           >
-            <div className="flex flex-col gap-1">
+            <div className="flex min-w-0 flex-col gap-1">
               <span className={cn(
                   "font-semibold text-sm",
                   toast.type === 'success' && "text-green-400",
@@ -67,7 +67,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               )}>
                 {toast.title}
               </span>
-              {toast.message && <span className="text-sm text-zinc-400">{toast.message}</span>}
+              {toast.message && (
+                <span className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-sm text-zinc-400">
+                  {toast.message}
+                </span>
+              )}
             </div>
             <button
               onClick={() => removeToast(toast.id)}
