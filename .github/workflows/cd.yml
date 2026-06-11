@@ -1,10 +1,16 @@
 name: CD
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
     branches:
       - main
-  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: cd-production
@@ -13,14 +19,16 @@ concurrency:
 jobs:
   deploy:
     name: Deploy to VPS
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Check deploy secrets
-        id: deploy_secrets
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
@@ -39,19 +47,11 @@ jobs:
               missing=1
             fi
           done
-          if [ "$missing" -eq 0 ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
+          if [ "$missing" -ne 0 ]; then
+            exit 1
           fi
 
-      - name: Skip deploy until secrets are configured
-        if: steps.deploy_secrets.outputs.configured != 'true'
-        run: |
-          echo "CD skipped: required GitHub Secrets are not configured yet."
-
       - name: Configure SSH
-        if: steps.deploy_secrets.outputs.configured == 'true'
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
@@ -64,7 +64,6 @@ jobs:
           ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts || true
 
       - name: Test SSH login
-        if: steps.deploy_secrets.outputs.configured == 'true'
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
@@ -77,7 +76,6 @@ jobs:
             "echo 'SSH login OK for monorepo deploy'"
 
       - name: Build deploy env files
-        if: steps.deploy_secrets.outputs.configured == 'true'
         env:
           POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
           POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
@@ -232,8 +230,7 @@ jobs:
           write_env .tmp-deploy/backend.env CLOUDINARY_API_KEY "${CLOUDINARY_API_KEY}"
           write_env .tmp-deploy/backend.env CLOUDINARY_API_SECRET "${CLOUDINARY_API_SECRET}"
 
-      - name: Upload env files to VPS
-        if: steps.deploy_secrets.outputs.configured == 'true'
+      - name: Upload deployment files to VPS
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
@@ -257,19 +254,25 @@ jobs:
             -o IdentitiesOnly=yes \
             .tmp-deploy/backend.env "${VPS_USER}@${VPS_HOST}:${APP_DIR}/deploy/env/backend.env"
 
+          scp -i ~/.ssh/deploy_key -P "${VPS_PORT:-22}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            deploy/vps-deploy.sh "${VPS_USER}@${VPS_HOST}:/tmp/seo-wb-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
+
       - name: Deploy application
-        if: steps.deploy_secrets.outputs.configured == 'true'
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           DEPLOY_BRANCH: ${{ secrets.DEPLOY_BRANCH }}
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           APP_DIR="${DEPLOY_PATH:-/opt/seo-wb}"
           BRANCH="${DEPLOY_BRANCH:-main}"
+          REMOTE_DEPLOY_SCRIPT="/tmp/seo-wb-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
           ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             "${VPS_USER}@${VPS_HOST}" \
-            "APP_DIR='${APP_DIR}' BRANCH='${BRANCH}' bash '${APP_DIR}/deploy/vps-deploy.sh'"
+            "trap 'rm -f \"${REMOTE_DEPLOY_SCRIPT}\"' EXIT; APP_DIR='${APP_DIR}' BRANCH='${BRANCH}' DEPLOY_SHA='${DEPLOY_SHA}' bash '${REMOTE_DEPLOY_SCRIPT}'"

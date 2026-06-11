@@ -838,7 +838,7 @@ export function CreateCardClient() {
   const handleGenerateVariantImages = async (
     variant: VariantCardState,
     input: {
-      frontImage: File;
+      frontImage?: File;
       backImage?: File;
       modelImage?: File;
       modelId?: string;
@@ -878,7 +878,9 @@ export function CreateCardClient() {
       formData.append("selectedModelBodyType", input.selectedModelBodyType || "");
       formData.append("style", input.backgroundStyle || "studio");
       formData.append("autoGenerateModel", input.autoGenerateModel ? "true" : "false");
-      formData.append("productFrontImage", input.frontImage);
+      if (input.frontImage) {
+        formData.append("productFrontImage", input.frontImage);
+      }
       if (input.backImage) {
         formData.append("productBackImage", input.backImage);
       }
@@ -896,7 +898,9 @@ export function CreateCardClient() {
       formData.append("selectedModelBodyType", input.selectedModelBodyType || "");
       formData.append("posePack", input.posePack || "");
       formData.append("backgroundStyle", input.backgroundStyle || "none");
-      formData.append("productFrontImage", input.frontImage);
+      if (input.frontImage) {
+        formData.append("productFrontImage", input.frontImage);
+      }
       if (input.backImage) {
         formData.append("productBackImage", input.backImage);
       }
@@ -909,7 +913,9 @@ export function CreateCardClient() {
     } else {
       endpoint = `/cards/drafts/${draftId}/image-generation/jobs`;
       formData.append("metadata_json", JSON.stringify(buildImageGenerationMetadata(variant)));
-      formData.append("front_image", input.frontImage);
+      if (input.frontImage) {
+        formData.append("front_image", input.frontImage);
+      }
       if (input.backImage) {
         formData.append("back_image", input.backImage);
       }

@@ -12,6 +12,7 @@ from app.models.user import User
 from app.schemas.card import CardUploadGroup, ImageAnalysis, ProductInput
 from app.services.card_generator import CardGenerator
 from app.services.card_payload_enricher import CardPayloadEnricher
+from app.services.garment_analyzer import GarmentAnalyzer
 from app.services.gemini_analyzer import GeminiAnalyzer
 from app.services.subject_resolver import SubjectResolver
 from app.services.wb_client import WildberriesClient
@@ -32,21 +33,49 @@ class CardFlowService:
             self._settings,
             lambda: run_in_threadpool(GeminiAnalyzer(self._settings).analyze, image_bytes, user_input),
         )
+        garment_json: dict[str, Any] = {}
+        try:
+            garment_json = await run_ai_limited(
+                self._settings,
+                lambda: run_in_threadpool(
+                    GarmentAnalyzer(self._settings).analyze,
+                    image_bytes[0],
+                    image_bytes[1] if len(image_bytes) > 1 else None,
+                    user_input.category or analysis.product_name,
+                    None,
+                    analysis.category or user_input.category,
+                    analysis.gender or user_input.gender,
+                ),
+            )
+        except Exception:
+            garment_json = {}
         subject = await self._resolve_subject(user_input, analysis)
         charcs = await self._wb.get_subject_charcs(int(subject["subjectID"]), locale="ru")
         card_payload = await run_ai_limited(
             self._settings,
-            lambda: run_in_threadpool(CardGenerator(self._settings).generate, user_input, analysis, subject, charcs),
+            lambda: run_in_threadpool(
+                CardGenerator(self._settings).generate,
+                user_input,
+                analysis,
+                subject,
+                charcs,
+                garment_json,
+            ),
         )
         raw_payload = [group.model_dump(mode="json", exclude_none=True) for group in card_payload]
         await self._enrich_payload(raw_payload, int(subject["subjectID"]), user_input=user_input, analysis=analysis)
+        analysis_payload = analysis.model_dump()
+        if garment_json:
+            analysis_payload["garment_json"] = garment_json
+            analysis_payload["garment_area"] = garment_json.get("garment_area")
         draft = CardDraft(
             user_id=self._user.id,
             store_id=self._store.id,
             status="draft",
             subject_id=int(subject["subjectID"]),
             vendor_code=card_payload[0].variants[0].vendorCode if card_payload and card_payload[0].variants else None,
-            analysis=analysis.model_dump(),
+            analysis=analysis_payload,
+            garment_json=garment_json,
             card_payload=raw_payload,
         )
         self._db.add(draft)

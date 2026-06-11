@@ -21,6 +21,7 @@ from app.services.wb_base_client import WbRateLimitError
 from app.services.wb_content_client import WbContentClient
 from app.services.wb_finance_client import WbFinanceClient
 from app.services.wb_product_sync_service import WbProductSyncService
+from app.services.rabbitmq_topology import SYNC_EXCHANGE, declare_sync_topology
 
 
 logger = logging.getLogger(__name__)
@@ -108,8 +109,9 @@ def publish_rabbitmq_job(rabbitmq_url: str, routing_key: str, store_id: int, pay
     connection = pika.BlockingConnection(params)
     try:
         channel = connection.channel()
+        declare_sync_topology(channel)
         channel.basic_publish(
-            exchange="wb.sync",
+            exchange=SYNC_EXCHANGE,
             routing_key=routing_key,
             body=json.dumps(sync_job),
             properties=pika.BasicProperties(
@@ -147,6 +149,7 @@ class FinanceAutomationService:
 
     async def run_scheduler_cycle_async(self, now: datetime | None = None) -> int:
         redis = self._require_redis()
+        cycle_now = now or datetime.now(UTC)
         acquired = await redis.set(
             FINANCE_AUTO_SYNC_LEADER_LOCK_KEY,
             "1",
@@ -166,10 +169,10 @@ class FinanceAutomationService:
                         continue
                     seller = ensure_seller_for_store(db, store)
                     state = ensure_finance_automation_state(db, self._settings, seller.id)
-                    state.last_scheduler_seen_at = now or datetime.now(UTC)
+                    state.last_scheduler_seen_at = cycle_now
                     db.commit()
 
-                    # Monitor Go sync progress for bootstrap
+                    # Monitor RabbitMQ sync worker progress for bootstrap.
                     if state.bootstrap_status in {"queued", "running"}:
                         product_completed = db.query(WbProductSyncState).filter(
                             WbProductSyncState.seller_id == seller.id,
@@ -187,7 +190,7 @@ class FinanceAutomationService:
 
                         if product_completed and finance_completed:
                             state.bootstrap_status = "completed"
-                            state.bootstrap_finished_at = now or datetime.now(UTC)
+                            state.bootstrap_finished_at = cycle_now
                             state.bootstrap_last_error = None
                             state.last_successful_daily_sync_date = state.bootstrap_range_to
                             state.last_attempted_daily_sync_date = state.bootstrap_range_to
@@ -211,14 +214,14 @@ class FinanceAutomationService:
 
                             if product_failed or finance_failed:
                                 state.bootstrap_status = "failed"
-                                state.bootstrap_finished_at = now or datetime.now(UTC)
+                                state.bootstrap_finished_at = cycle_now
                                 state.bootstrap_last_error = (
                                     (product_failed.last_error if product_failed else finance_failed.last_error)
-                                    or "Failed during Go bootstrap sync."
+                                    or "Failed during bootstrap sync."
                                 )
                                 db.commit()
 
-                    # Monitor Go sync progress for daily
+                    # Monitor RabbitMQ sync worker progress for daily sync.
                     if state.last_daily_status == "running" and state.last_attempted_daily_sync_date:
                         finance_completed = db.query(WbFinanceSyncState).filter(
                             WbFinanceSyncState.seller_id == seller.id,
@@ -242,11 +245,17 @@ class FinanceAutomationService:
                             ).first()
                             if finance_failed:
                                 state.last_daily_status = "failed"
-                                state.last_daily_error = finance_failed.last_error or "Failed during Go daily sync."
+                                state.last_daily_error = finance_failed.last_error or "Failed during daily sync."
                                 db.commit()
+
+                    if self._failure_retry_pending(state.bootstrap_status, state.bootstrap_finished_at, cycle_now):
+                        continue
 
                     if state.bootstrap_status != "completed":
                         enqueued += int(await self._enqueue_for_store(FinanceAutomationJob(kind="bootstrap_store", store_id=store.id)))
+                        continue
+
+                    if self._failure_retry_pending(state.last_daily_status, state.updated_at, cycle_now):
                         continue
 
                     from_date = state.last_successful_daily_sync_date or state.bootstrap_range_to
@@ -451,3 +460,9 @@ class FinanceAutomationService:
         if job.kind == "bootstrap_store":
             return f"finance:auto:sync:queued:bootstrap:{job.store_id}"
         return f"finance:auto:sync:queued:daily:{job.store_id}:{job.target_date}"
+
+    def _failure_retry_pending(self, status: str | None, failed_at: datetime | None, now: datetime) -> bool:
+        if status != "failed" or failed_at is None:
+            return False
+        failed_at_utc = failed_at.astimezone(UTC) if failed_at.tzinfo else failed_at.replace(tzinfo=UTC)
+        return (now - failed_at_utc).total_seconds() < self._settings.finance_failed_retry_seconds

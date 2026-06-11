@@ -9,6 +9,7 @@ Tai lieu nay dung cho monorepo hien tai khi deploy toan bo du an len mot VPS ban
 - `rabbitmq`: publisher cho `card.push`
 - `backend`: FastAPI + tu dong chay migration khi start
 - `worker`: image generation worker
+- `sync-worker`: RabbitMQ consumer cho `card.push`, `product.sync`, `finance.sync`
 - `finance-worker`: finance queue consumer
 - `finance-scheduler`: finance nightly scheduler
 - `usage-reset-scheduler`: reset usage hang thang
@@ -140,6 +141,7 @@ Xem log:
 ```bash
 docker compose --env-file deploy/env/compose.env -f docker-compose.production.yml logs --tail=100 backend
 docker compose --env-file deploy/env/compose.env -f docker-compose.production.yml logs --tail=100 worker
+docker compose --env-file deploy/env/compose.env -f docker-compose.production.yml logs --tail=100 sync-worker
 docker compose --env-file deploy/env/compose.env -f docker-compose.production.yml logs --tail=100 finance-worker
 docker compose --env-file deploy/env/compose.env -f docker-compose.production.yml logs --tail=100 finance-scheduler
 docker compose --env-file deploy/env/compose.env -f docker-compose.production.yml logs --tail=100 usage-reset-scheduler
@@ -208,14 +210,19 @@ Chay khi `push` va `pull_request`:
 
 ### CD
 
-Chay khi `push` len branch `main` hoac trigger tay bang `workflow_dispatch`.
+Chay sau khi workflow CI cua branch `main` thanh cong.
 
 CD se:
 
+- chi deploy dung commit SHA da vuot qua CI
+- bo qua workflow cu neu branch production da co commit moi hon
+- fail neu thieu GitHub Secrets bat buoc
 - SSH vao VPS
 - tao/ghi de `deploy/env/compose.env`
 - tao/ghi de `deploy/env/backend.env`
-- chay [deploy/vps-deploy.sh](/c:/Users/admin/seo-wb/deploy/vps-deploy.sh)
+- upload va chay [deploy/vps-deploy.sh](/c:/Users/admin/seo-wb/deploy/vps-deploy.sh) tu commit da vuot qua CI
+- build va restart day du backend, frontend va cac worker, bao gom `sync-worker`
+- cho health check hoan tat; neu deploy loi thi rollback best-effort ve commit truoc
 
 ### GitHub Secrets toi thieu
 
@@ -256,10 +263,11 @@ Secrets co default neu bo trong:
 
 - Workflow CD dang target `environment: production`, nen ban co the dat environment secrets/approval trong GitHub de chan deploy nham.
 - `DEPLOY_PATH` mac dinh la `/opt/seo-wb`.
+- Khi deploy loi, rerun CD tu GitHub Actions de van giu rang buoc commit da vuot qua CI.
 
 ## 10. Luu y quan trong
 
 - `redis` la bat buoc cho image jobs va finance jobs.
-- `rabbitmq` nen duoc chay trong production vi route card push dang publish sang exchange RabbitMQ.
+- `rabbitmq` va `sync-worker` phai cung chay trong production; neu thieu `sync-worker`, queue `wb.sync.jobs` se khong co consumer.
 - Khong commit `deploy/env/*.env`.
 - Truoc khi rollback database, backup Postgres truoc.

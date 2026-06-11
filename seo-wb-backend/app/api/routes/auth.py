@@ -20,7 +20,15 @@ from app.core.security import (
 )
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UsageSummaryResponse, UserResponse
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    ProfileUpdateRequest,
+    RegisterRequest,
+    TokenResponse,
+    UsageSummaryResponse,
+    UserResponse,
+)
 from app.services.usage_plans import apply_plan_defaults, get_usage_plan
 
 
@@ -93,6 +101,39 @@ def logout(
 @router.get("/me", response_model=UserResponse)
 def me(user: Annotated[User, Depends(get_current_user)]) -> UserResponse:
     return UserResponse(id=user.id, name=user.name, email=user.email, role=user.role, status=user.status, plan_type=user.plan_type)
+
+
+@router.patch("/me", response_model=UserResponse)
+def update_me(
+    payload: ProfileUpdateRequest,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> UserResponse:
+    next_name = payload.display_name if payload.display_name is not None else payload.name
+    if next_name is None:
+        raise AppError("missing_profile_fields", "Provide name or display_name to update the profile.", 400)
+    normalized_name = next_name.strip()
+    if len(normalized_name) < 2:
+        raise AppError("invalid_name", "Name must be at least 2 characters.", 400)
+    user.name = normalized_name
+    db.commit()
+    db.refresh(user)
+    return UserResponse(id=user.id, name=user.name, email=user.email, role=user.role, status=user.status, plan_type=user.plan_type)
+
+
+@router.post("/change-password", status_code=204)
+def change_password(
+    payload: ChangePasswordRequest,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    if not verify_password(payload.current_password, user.password_hash):
+        raise AppError("invalid_current_password", "Current password is incorrect.", 401)
+    if verify_password(payload.new_password, user.password_hash):
+        raise AppError("password_unchanged", "New password must be different from the current password.", 400)
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/usage", response_model=UsageSummaryResponse)

@@ -220,40 +220,10 @@ export default function AdminUsersPage() {
                           ))}
                         </select>
                         <div className="text-xs text-stone-500">
-                          Max/job: {user.max_images_per_job} · GPT: {user.allow_gpt_image ? "on" : "off"} · VTON: {user.allow_legacy_vton ? "on" : "off"}
+                          Max/job: {user.max_images_per_job} - GPT: {user.allow_gpt_image ? "on" : "off"} - VTON: {user.allow_legacy_vton ? "on" : "off"}
                         </div>
                         <div className="text-xs text-stone-500">
-                          Priority queue: {user.priority_queue ? "yes" : "no"} · Next reset: {formatDate(user.quota_reset_at)}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 min-w-[220px]">
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium text-stone-700">
-                          {user.credit_balance} available / {user.credits_granted} granted
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <input
-                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
-                            type="number"
-                            value={user.credit_balance}
-                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, credit_balance: Number(e.target.value) || 0 } : item))}
-                            onBlur={(e) => updateUser(user, { credit_balance: Number(e.target.value) || 0 })}
-                          />
-                          <input
-                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
-                            type="number"
-                            value={user.credits_used}
-                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, credits_used: Number(e.target.value) || 0 } : item))}
-                            onBlur={(e) => updateUser(user, { credits_used: Number(e.target.value) || 0 })}
-                          />
-                          <input
-                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
-                            type="number"
-                            value={user.credits_granted}
-                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, credits_granted: Number(e.target.value) || 0 } : item))}
-                            onBlur={(e) => updateUser(user, { credits_granted: Number(e.target.value) || 0 })}
-                          />
+                          Priority queue: {user.priority_queue ? "yes" : "no"} - Next reset: {formatDate(user.quota_reset_at)}
                         </div>
                       </div>
                     </td>
@@ -271,6 +241,7 @@ export default function AdminUsersPage() {
                           <input
                             className="w-full rounded-lg border border-stone-200 px-2 py-1"
                             type="number"
+                            aria-label={`Monthly image quota for ${user.email}`}
                             value={user.monthly_quota}
                             onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, monthly_quota: Number(e.target.value) || 0 } : item))}
                             onBlur={(e) => updateUser(user, { monthly_quota: Number(e.target.value) || 0 })}
@@ -278,10 +249,15 @@ export default function AdminUsersPage() {
                           <input
                             className="w-full rounded-lg border border-stone-200 px-2 py-1"
                             type="number"
+                            aria-label={`Used image quota for ${user.email}`}
                             value={user.used_quota}
                             onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, used_quota: Number(e.target.value) || 0 } : item))}
                             onBlur={(e) => updateUser(user, { used_quota: Number(e.target.value) || 0 })}
                           />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-[11px] uppercase tracking-wide text-stone-400">
+                          <span>Monthly</span>
+                          <span>Used</span>
                         </div>
                       </div>
                     </td>
@@ -298,6 +274,7 @@ export default function AdminUsersPage() {
                           <input
                             className="w-full rounded-lg border border-stone-200 px-2 py-1"
                             type="number"
+                            aria-label={`Monthly card quota for ${user.email}`}
                             value={user.monthly_card_quota}
                             onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, monthly_card_quota: Number(e.target.value) || 0 } : item))}
                             onBlur={(e) => updateUser(user, { monthly_card_quota: Number(e.target.value) || 0 })}
@@ -305,10 +282,15 @@ export default function AdminUsersPage() {
                           <input
                             className="w-full rounded-lg border border-stone-200 px-2 py-1"
                             type="number"
+                            aria-label={`Used card quota for ${user.email}`}
                             value={user.used_card_quota}
                             onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, used_card_quota: Number(e.target.value) || 0 } : item))}
                             onBlur={(e) => updateUser(user, { used_card_quota: Number(e.target.value) || 0 })}
                           />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-[11px] uppercase tracking-wide text-stone-400">
+                          <span>Monthly</span>
+                          <span>Used</span>
                         </div>
                       </div>
                     </td>
@@ -321,9 +303,9 @@ export default function AdminUsersPage() {
                           <div className="h-2 overflow-hidden rounded-full bg-stone-200">
                             <div
                               className={`h-full ${quotaTone(user.used_cost, user.monthly_cost_limit)}`}
-                            style={{ width: `${Math.min(100, user.monthly_cost_limit > 0 ? (user.used_cost / user.monthly_cost_limit) * 100 : 0)}%` }}
-                          />
-                        </div>
+                              style={{ width: `${Math.min(100, user.monthly_cost_limit > 0 ? (user.used_cost / user.monthly_cost_limit) * 100 : 0)}%` }}
+                            />
+                          </div>
                         )}
                         {user.close_to_cost_limit && <div className="text-xs font-medium text-amber-600">Close to cost limit</div>}
                         <div className="grid grid-cols-2 gap-2">
@@ -331,6 +313,7 @@ export default function AdminUsersPage() {
                             className="w-full rounded-lg border border-stone-200 px-2 py-1"
                             type="number"
                             step="0.01"
+                            aria-label={`Monthly cost limit for ${user.email}`}
                             value={user.monthly_cost_limit ?? ""}
                             placeholder="Unlimited"
                             onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, monthly_cost_limit: e.target.value === "" ? null : Number(e.target.value) } : item))}
@@ -340,10 +323,53 @@ export default function AdminUsersPage() {
                             className="w-full rounded-lg border border-stone-200 px-2 py-1"
                             type="number"
                             step="0.01"
+                            aria-label={`Used cost for ${user.email}`}
                             value={user.used_cost}
                             onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, used_cost: Number(e.target.value) || 0 } : item))}
                             onBlur={(e) => updateUser(user, { used_cost: Number(e.target.value) || 0 })}
                           />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-[11px] uppercase tracking-wide text-stone-400">
+                          <span>Limit</span>
+                          <span>Used</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 min-w-[220px]">
+                      <div className="space-y-2">
+                        <div className="text-xs font-medium text-stone-700">
+                          {user.credit_balance} available / {user.credits_granted} granted
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <input
+                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
+                            type="number"
+                            aria-label={`Credit balance for ${user.email}`}
+                            value={user.credit_balance}
+                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, credit_balance: Number(e.target.value) || 0 } : item))}
+                            onBlur={(e) => updateUser(user, { credit_balance: Number(e.target.value) || 0 })}
+                          />
+                          <input
+                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
+                            type="number"
+                            aria-label={`Credits used for ${user.email}`}
+                            value={user.credits_used}
+                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, credits_used: Number(e.target.value) || 0 } : item))}
+                            onBlur={(e) => updateUser(user, { credits_used: Number(e.target.value) || 0 })}
+                          />
+                          <input
+                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
+                            type="number"
+                            aria-label={`Credits granted for ${user.email}`}
+                            value={user.credits_granted}
+                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, credits_granted: Number(e.target.value) || 0 } : item))}
+                            onBlur={(e) => updateUser(user, { credits_granted: Number(e.target.value) || 0 })}
+                          />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-[11px] uppercase tracking-wide text-stone-400">
+                          <span>Balance</span>
+                          <span>Used</span>
+                          <span>Granted</span>
                         </div>
                       </div>
                     </td>

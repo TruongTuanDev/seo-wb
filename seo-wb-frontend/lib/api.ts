@@ -44,15 +44,16 @@ async function fetchWithAuth(url: string, options: ApiOptions = {}) {
     if (response.status === 401 && requireAuth && redirectOnUnauthorized && typeof window !== "undefined") {
       window.location.href = "/login";
     }
-    let errorMsg = "An error occurred";
+    const rawBody = await response.text();
+    let errorMsg = rawBody || response.statusText || "An error occurred";
     try {
-      const errorData = await response.json();
+      const errorData = JSON.parse(rawBody);
       errorMsg =
         errorData?.error?.message ||
         errorData?.detail?.message ||
         errorData?.detail ||
         errorData?.message ||
-        JSON.stringify(errorData);
+        errorMsg;
       const details = errorData?.error?.details || errorData?.details;
       if (details) {
         const detailsText = typeof details === "string" ? details : JSON.stringify(details);
@@ -61,7 +62,7 @@ async function fetchWithAuth(url: string, options: ApiOptions = {}) {
         }
       }
     } catch {
-      errorMsg = await response.text() || response.statusText;
+      // Keep the raw text because a Response body can only be consumed once.
     }
     throw new Error(errorMsg);
   }

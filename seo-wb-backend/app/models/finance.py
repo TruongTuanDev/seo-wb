@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -84,14 +84,14 @@ class WbFinanceReportRow(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     seller_id: Mapped[int] = mapped_column(ForeignKey("sellers.id", ondelete="CASCADE"), nullable=False, index=True)
-    report_id: Mapped[int | None] = mapped_column(nullable=True)
+    report_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     date_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     date_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     create_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
     report_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    rrd_id: Mapped[int] = mapped_column(nullable=False, index=True)
-    nm_id: Mapped[int | None] = mapped_column(nullable=True, index=True)
+    rrd_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    nm_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     brand_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     vendor_code: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -110,7 +110,7 @@ class WbFinanceReportRow(Base):
     order_dt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sale_dt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     rr_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
-    shk_id: Mapped[int | None] = mapped_column(nullable=True)
+    shk_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     delivery_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     return_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     delivery_service: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0"), nullable=False)
@@ -126,7 +126,7 @@ class WbFinanceReportRow(Base):
     paid_storage: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0"), nullable=False)
     deduction: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0"), nullable=False)
     paid_acceptance: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0"), nullable=False)
-    order_id: Mapped[int | None] = mapped_column(nullable=True)
+    order_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     order_uid: Mapped[str | None] = mapped_column(Text, nullable=True)
     srid: Mapped[str | None] = mapped_column(Text, nullable=True)
     kiz: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -155,7 +155,7 @@ class WbFinanceSyncState(Base):
     date_from: Mapped[date] = mapped_column(Date, nullable=False)
     date_to: Mapped[date] = mapped_column(Date, nullable=False)
     period: Mapped[str] = mapped_column(String(20), default="daily", nullable=False)
-    last_rrd_id: Mapped[int] = mapped_column(default=0, nullable=False)
+    last_rrd_id: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="idle", nullable=False)
     total_rows: Mapped[int] = mapped_column(default=0, nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)

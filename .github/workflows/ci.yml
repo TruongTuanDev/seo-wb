@@ -86,3 +86,6 @@ jobs:
 
       - name: Validate docker compose
         run: docker compose --env-file deploy/env/compose.env -f docker-compose.production.yml config
+
+      - name: Validate deploy script syntax
+        run: bash -n deploy/vps-deploy.sh

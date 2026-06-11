@@ -44,6 +44,7 @@ from app.services.usage_plans import get_usage_plan
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 JOB_STORAGE_DIR = Path("storage/card_jobs")
+DRAFT_REFERENCE_STORAGE_DIR = Path("storage/card_drafts")
 CHUNK_SIZE = 1024 * 1024
 
 def resolve_model_image_path(model_id: str) -> Path | None:
@@ -268,6 +269,100 @@ def _draft_garment_json(draft: CardDraft) -> dict[str, Any]:
     return garment_json if isinstance(garment_json, dict) else {}
 
 
+def _draft_reference_manifest(draft: CardDraft) -> dict[str, Any]:
+    analysis = _draft_analysis(draft)
+    manifest = analysis.get("reference_images")
+    return manifest if isinstance(manifest, dict) else {}
+
+
+def _draft_reference_dir(draft_id: int) -> Path:
+    return DRAFT_REFERENCE_STORAGE_DIR / str(draft_id) / "references"
+
+
+def _guess_reference_extension(file_name: str | None) -> str:
+    suffix = Path(file_name or "").suffix.lower()
+    if suffix in {".jpg", ".jpeg", ".png", ".webp"}:
+        return suffix
+    return ".jpg"
+
+
+def _store_draft_reference_images(draft: CardDraft, image_bytes: list[bytes], file_names: list[str | None]) -> dict[str, Any]:
+    if not image_bytes:
+        return _draft_reference_manifest(draft)
+    reference_dir = _draft_reference_dir(draft.id)
+    reference_dir.mkdir(parents=True, exist_ok=True)
+    manifest: dict[str, Any] = {}
+
+    front_ext = _guess_reference_extension(file_names[0] if file_names else None)
+    front_name = f"front{front_ext}"
+    (reference_dir / front_name).write_bytes(image_bytes[0])
+    manifest["front"] = front_name
+
+    if len(image_bytes) > 1:
+        back_ext = _guess_reference_extension(file_names[1] if len(file_names) > 1 else None)
+        back_name = f"back{back_ext}"
+        (reference_dir / back_name).write_bytes(image_bytes[1])
+        manifest["back"] = back_name
+
+    return manifest
+
+
+def _load_draft_reference_images(draft: CardDraft) -> tuple[bytes | None, bytes | None]:
+    manifest = _draft_reference_manifest(draft)
+    reference_dir = _draft_reference_dir(draft.id)
+
+    def _read_ref(name: str) -> bytes | None:
+        file_name = manifest.get(name)
+        if not file_name:
+            return None
+        path = (reference_dir / str(file_name)).resolve()
+        try:
+            path.relative_to(reference_dir.resolve())
+        except ValueError as exc:
+            raise AppError("invalid_reference_image", "Stored reference image path is invalid.", 500) from exc
+        if not path.exists():
+            return None
+        return path.read_bytes()
+
+    return _read_ref("front"), _read_ref("back")
+
+
+async def _resolve_product_reference_images(
+    draft: CardDraft,
+    settings: Settings,
+    *,
+    front_upload: UploadFile | None,
+    back_upload: UploadFile | None,
+    allow_missing_back: bool = True,
+) -> tuple[bytes, bytes | None]:
+    if front_upload is not None:
+        _validate_image_upload(front_upload)
+        front_bytes = await _read_upload_limited(front_upload, settings.max_upload_image_bytes, "image_too_large")
+    else:
+        front_bytes, _ = _load_draft_reference_images(draft)
+        if front_bytes is None:
+            raise AppError(
+                "missing_front_reference",
+                "Front product image is required. Upload it once in the first step or provide a new front image.",
+                400,
+            )
+
+    if back_upload is not None:
+        _validate_image_upload(back_upload)
+        back_bytes = await _read_upload_limited(back_upload, settings.max_upload_image_bytes, "image_too_large")
+    else:
+        _, back_bytes = _load_draft_reference_images(draft)
+
+    if not allow_missing_back and back_bytes is None:
+        raise AppError(
+            "missing_back_reference",
+            "Back product image is required for this action. Upload it in the first step or provide a new back image.",
+            400,
+        )
+
+    return front_bytes, back_bytes
+
+
 def _extract_variant_context(draft: CardDraft, variant_index: int) -> tuple[str | None, str | None]:
     payload = draft.card_payload if isinstance(draft.card_payload, list) else []
     if not payload or not isinstance(payload[0], dict):
@@ -346,6 +441,13 @@ async def generate_card(
         for image in images
     ]
     draft = await CardFlowService(settings, db, user, store).generate_draft(image_bytes, product_input)
+    reference_manifest = _store_draft_reference_images(draft, image_bytes, [image.filename for image in images])
+    if reference_manifest:
+        analysis_copy = dict(draft.analysis or {})
+        analysis_copy["reference_images"] = reference_manifest
+        draft.analysis = analysis_copy
+        db.commit()
+        db.refresh(draft)
     card_payload = [CardUploadGroup.model_validate(group) for group in draft.card_payload]
     analysis = _draft_analysis(draft)
     return CardGenerateResponse(
@@ -461,8 +563,8 @@ async def enqueue_image_generation_job(
     variant_index: int = Form(...),
     quantity: int = Form(...),
     metadata_json: str = Form(default="{}"),
-    front_image: UploadFile = File(...),
-    back_image: UploadFile = File(...),
+    front_image: UploadFile | None = File(default=None),
+    back_image: UploadFile | None = File(default=None),
     model_image: UploadFile | None = File(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -487,13 +589,17 @@ async def enqueue_image_generation_job(
     except Exception as exc:
         raise AppError("invalid_image_job_metadata", "metadata_json must be a valid JSON object.", 400) from exc
 
-    for upload in [front_image, back_image, model_image]:
+    for upload in [model_image]:
         if upload is not None:
             _validate_image_upload(upload)
     metadata["runtime_config"] = runtime_config
     metadata.setdefault("model", runtime_config["default_image_model"])
-    front_bytes = await _read_upload_limited(front_image, settings.max_upload_image_bytes, "image_too_large")
-    back_bytes = await _read_upload_limited(back_image, settings.max_upload_image_bytes, "image_too_large")
+    front_bytes, back_bytes = await _resolve_product_reference_images(
+        draft,
+        settings,
+        front_upload=front_image,
+        back_upload=back_image,
+    )
     model_bytes = await _read_upload_limited(model_image, settings.max_upload_image_bytes, "image_too_large") if model_image else None
     redis = require_redis(settings)
     job = await ProductImageGenerator(settings, redis).create_job(
@@ -563,7 +669,7 @@ async def enqueue_try_on_job(
     posePack: str = Form(default=""),
     backgroundStyle: str = Form(default="none"),
     quantity: int = Form(...),
-    productFrontImage: UploadFile = File(...),
+    productFrontImage: UploadFile | None = File(default=None),
     productBackImage: UploadFile | None = File(default=None),
     productCategory: str = Form(default=""),
     garmentType: str = Form(default=""),
@@ -586,13 +692,12 @@ async def enqueue_try_on_job(
     _enforce_generation_budget(db, locked_user, quantity, estimated_cost)
     _enforce_credit_balance(db, locked_user, credit_cost)
         
-    for upload in [productFrontImage]:
-        _validate_image_upload(upload)
-    if productBackImage:
-        _validate_image_upload(productBackImage)
-
-    front_bytes = await _read_upload_limited(productFrontImage, settings.max_upload_image_bytes, "image_too_large")
-    back_bytes = await _read_upload_limited(productBackImage, settings.max_upload_image_bytes, "image_too_large") if productBackImage else None
+    front_bytes, back_bytes = await _resolve_product_reference_images(
+        draft,
+        settings,
+        front_upload=productFrontImage,
+        back_upload=productBackImage,
+    )
     
     # Resolve product category and garment type
     resolved_category = productCategory
@@ -660,7 +765,7 @@ async def get_try_on_job(
 @router.post("/drafts/{draft_id}/garment/analyze")
 async def analyze_draft_garment(
     draft_id: int,
-    front_image: UploadFile = File(...),
+    front_image: UploadFile | None = File(default=None),
     back_image: UploadFile | None = File(default=None),
     title: str | None = Form(default=None),
     description: str | None = Form(default=None),
@@ -671,12 +776,12 @@ async def analyze_draft_garment(
     user: User = Depends(get_current_user),
 ):
     draft = _get_owned_draft(db, user, draft_id)
-    _validate_image_upload(front_image)
-    if back_image:
-        _validate_image_upload(back_image)
-    
-    front_bytes = await _read_upload_limited(front_image, settings.max_upload_image_bytes, "image_too_large")
-    back_bytes = await _read_upload_limited(back_image, settings.max_upload_image_bytes, "image_too_large") if back_image else None
+    front_bytes, back_bytes = await _resolve_product_reference_images(
+        draft,
+        settings,
+        front_upload=front_image,
+        back_upload=back_image,
+    )
 
     from app.services.garment_analyzer import GarmentAnalyzer
     analyzer = GarmentAnalyzer(settings)
@@ -695,6 +800,14 @@ async def analyze_draft_garment(
     analysis_copy["garment_area"] = garment_json.get("garment_area")
     draft.analysis = analysis_copy
     draft.garment_json = garment_json
+    if front_image is not None or back_image is not None:
+        updated_bytes = [front_bytes]
+        updated_names = [front_image.filename if front_image is not None else "front.jpg"]
+        if back_bytes is not None:
+            updated_bytes.append(back_bytes)
+            updated_names.append(back_image.filename if back_image is not None else "back.jpg")
+        analysis_copy["reference_images"] = _store_draft_reference_images(draft, updated_bytes, updated_names)
+        draft.analysis = analysis_copy
     db.commit()
 
     return garment_json
@@ -725,7 +838,7 @@ async def enqueue_gpt_image_job(
     selectedModelBodyType: str | None = Form(default=None),
     style: str = Form(...),
     quantity: int = Form(...),
-    productFrontImage: UploadFile = File(...),
+    productFrontImage: UploadFile | None = File(default=None),
     productBackImage: UploadFile | None = File(default=None),
     autoGenerateModel: bool = Form(default=False),
     model: str | None = Form(default=None),
@@ -751,12 +864,12 @@ async def enqueue_gpt_image_job(
     if not auto_model_generation and (not selectedModelId or selectedModelId == "none"):
         raise AppError("missing_model_reference", "Please select a real model reference before generating catalog images.", 400)
 
-    _validate_image_upload(productFrontImage)
-    if productBackImage:
-        _validate_image_upload(productBackImage)
-
-    front_bytes = await _read_upload_limited(productFrontImage, settings.max_upload_image_bytes, "image_too_large")
-    back_bytes = await _read_upload_limited(productBackImage, settings.max_upload_image_bytes, "image_too_large") if productBackImage else None
+    front_bytes, back_bytes = await _resolve_product_reference_images(
+        draft,
+        settings,
+        front_upload=productFrontImage,
+        back_upload=productBackImage,
+    )
 
     # Resolve model reference image
     model_bytes = None
@@ -864,7 +977,7 @@ async def enqueue_gpt_image_openai_job(
     selectedModelBodyType: str | None = Form(default=None),
     style: str = Form(...),
     quantity: int = Form(...),
-    productFrontImage: UploadFile = File(...),
+    productFrontImage: UploadFile | None = File(default=None),
     productBackImage: UploadFile | None = File(default=None),
     modelImage: UploadFile | None = File(default=None),
     autoGenerateModel: bool = Form(default=False),
@@ -891,14 +1004,15 @@ async def enqueue_gpt_image_openai_job(
     if not auto_model_generation and not modelImage and (not selectedModelId or selectedModelId == "none"):
         raise AppError("missing_model_reference", "Please select a real model reference before generating catalog images.", 400)
 
-    _validate_image_upload(productFrontImage)
-    if productBackImage:
-        _validate_image_upload(productBackImage)
     if modelImage:
         _validate_image_upload(modelImage)
 
-    front_bytes = await _read_upload_limited(productFrontImage, settings.max_upload_image_bytes, "image_too_large")
-    back_bytes = await _read_upload_limited(productBackImage, settings.max_upload_image_bytes, "image_too_large") if productBackImage else None
+    front_bytes, back_bytes = await _resolve_product_reference_images(
+        draft,
+        settings,
+        front_upload=productFrontImage,
+        back_upload=productBackImage,
+    )
 
     # Resolve model reference image
     model_bytes = None

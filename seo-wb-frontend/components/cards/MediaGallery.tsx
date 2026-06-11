@@ -227,7 +227,7 @@ interface MediaGalleryProps {
   onSetDraggedImageIndex: (index: number | null) => void;
   onAddImages: (files: FileList) => void;
   onGenerateImages: (input: {
-    frontImage: File;
+    frontImage?: File;
     backImage?: File;
     modelImage?: File;
     modelId?: string;
@@ -287,6 +287,13 @@ export function MediaGallery({
   const inheritedBackImage = variant?.images[1] ?? null;
   const effectiveFrontImage = frontImage ?? inheritedFrontImage;
   const effectiveBackImage = backImage ?? inheritedBackImage;
+  const hasSavedDraftFront = inheritedFrontImage !== null;
+  const hasSavedDraftBack = inheritedBackImage !== null;
+  const isFrontOverride = frontImage !== null;
+  const isBackOverride = backImage !== null;
+  const isUsingSavedDraftReferences = Boolean(
+    (hasSavedDraftFront || hasSavedDraftBack) && !isFrontOverride && !isBackOverride
+  );
 
   const mappedGarmentType = getModelGarmentType(productCategory);
   const displayModels = mappedGarmentType
@@ -380,9 +387,11 @@ export function MediaGallery({
     setValidationError("");
     try {
       const formData = new FormData();
-      formData.append("front_image", effectiveFrontImage);
-      if (effectiveBackImage) {
-        formData.append("back_image", effectiveBackImage);
+      if (frontImage) {
+        formData.append("front_image", frontImage);
+      }
+      if (backImage) {
+        formData.append("back_image", backImage);
       }
       formData.append("category", productCategory);
       formData.append("title", variant?.title || "");
@@ -562,6 +571,17 @@ export function MediaGallery({
     selectFile(fileList, setter);
   };
 
+  const resetReferenceOverride = (target: "front" | "back") => {
+    setGarmentJson(null);
+    if (target === "front") {
+      setFrontImage(null);
+      setIsEditingReferences(backImage !== null);
+      return;
+    }
+    setBackImage(null);
+    setIsEditingReferences(frontImage !== null);
+  };
+
   const submit = () => {
     if (!effectiveFrontImage) {
       setValidationError("Front product image is required.");
@@ -577,8 +597,8 @@ export function MediaGallery({
         return;
       }
       onGenerateImages({
-        frontImage: effectiveFrontImage,
-        backImage: effectiveBackImage || undefined,
+        frontImage: frontImage || undefined,
+        backImage: backImage || undefined,
         modelImage: customModelImage,
         modelId: "none",
         backgroundStyle,
@@ -594,8 +614,8 @@ export function MediaGallery({
         return;
       }
       onGenerateImages({
-        frontImage: effectiveFrontImage,
-        backImage: effectiveBackImage || undefined,
+        frontImage: frontImage || undefined,
+        backImage: backImage || undefined,
         modelId: "auto_russian_model",
         selectedModelGender: recommendations?.recommendedModelGender || productGenderText.toLowerCase(),
         selectedModelBodyType: recommendations?.recommendedBodyType || "",
@@ -621,8 +641,8 @@ export function MediaGallery({
         return;
       }
       onGenerateImages({
-        frontImage: effectiveFrontImage,
-        backImage: effectiveBackImage || undefined,
+        frontImage: frontImage || undefined,
+        backImage: backImage || undefined,
         modelId: chosenModel.id,
         selectedModelImageUrl: chosenModel.frontImageUrl,
         selectedModelGender: chosenModel.gender,
@@ -682,10 +702,11 @@ export function MediaGallery({
           <div>
             <div className="text-sm font-semibold text-zinc-950">Product references</div>
             <div className="mt-1 text-xs text-zinc-500">
-              {frontImage
-                || inheritedFrontImage
-                ? "These references were carried over from Inputs and will be reused for image generation."
-                : "Upload front and back product photos here first. These references are reused later in the generate flow."}
+              {isUsingSavedDraftReferences
+                ? "Using saved draft references. You can generate images without uploading again."
+                : effectiveFrontImage
+                  ? "Custom reference for this generation. New images will override the saved draft references only for this job."
+                  : "Upload front and back product photos here first. These references are reused later in the generate flow."}
             </div>
           </div>
           <span
@@ -698,47 +719,64 @@ export function MediaGallery({
             {garmentJson ? "Analyzed" : "Waiting for analysis"}
           </span>
         </div>
-        {effectiveFrontImage && !isEditingReferences ? (
-          <div className="mt-4 space-y-3">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-zinc-200 bg-white p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Front</div>
-                <div className="mt-2 relative h-32 w-full overflow-hidden rounded-md bg-zinc-100">
-                  <FilePreviewImage file={effectiveFrontImage} className="h-full w-full object-contain p-1" alt="Front product reference" />
-                </div>
-                <div className="mt-2 line-clamp-1 text-xs text-zinc-500">{effectiveFrontImage.name}</div>
-              </div>
-              <div className="rounded-lg border border-zinc-200 bg-white p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Back</div>
-                <div className="mt-2 relative h-32 w-full overflow-hidden rounded-md bg-zinc-100">
-                  {effectiveBackImage ? (
-                    <FilePreviewImage file={effectiveBackImage} className="h-full w-full object-contain p-1" alt="Back product reference" />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-xs text-zinc-400">Optional</div>
-                  )}
-                </div>
-                <div className="mt-2 line-clamp-1 text-xs text-zinc-500">{effectiveBackImage?.name || "No back image uploaded"}</div>
-              </div>
-            </div>
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-              Using the product references you uploaded in Inputs. You do not need to upload them again here.
-            </div>
+        <div className="mt-4 space-y-3">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <ImageInput
+              label="Front Product Image *"
+              required
+              file={effectiveFrontImage}
+              onChange={(files) => selectProductReference(files, setFrontImage)}
+              badgeLabel={isFrontOverride ? "Override for this job" : hasSavedDraftFront ? "Saved from draft" : undefined}
+              badgeTone={isFrontOverride ? "amber" : "emerald"}
+              helperText={
+                isFrontOverride
+                  ? "Custom reference for this generation."
+                  : hasSavedDraftFront
+                    ? "Using saved draft references."
+                    : "Front image is required before generate."
+              }
+              resetLabel={isFrontOverride && hasSavedDraftFront ? "Use saved draft image again" : undefined}
+              onReset={isFrontOverride && hasSavedDraftFront ? () => resetReferenceOverride("front") : undefined}
+            />
+            <ImageInput
+              label="Back Product Image (Optional)"
+              file={effectiveBackImage}
+              onChange={(files) => selectProductReference(files, setBackImage)}
+              badgeLabel={isBackOverride ? "Override for this job" : hasSavedDraftBack ? "Saved from draft" : undefined}
+              badgeTone={isBackOverride ? "amber" : "emerald"}
+              helperText={
+                isBackOverride
+                  ? "Custom reference for this generation."
+                  : hasSavedDraftBack
+                    ? "Using saved draft references."
+                    : "Back image not provided. Front-only generation is supported."
+              }
+              emptyLabel="Back image not provided. Front-only generation is supported."
+              resetLabel={isBackOverride && hasSavedDraftBack ? "Use saved draft image again" : undefined}
+              onReset={isBackOverride && hasSavedDraftBack ? () => resetReferenceOverride("back") : undefined}
+            />
           </div>
-        ) : (
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <ImageInput label="Front Product Image *" required file={frontImage} onChange={(files) => selectProductReference(files, setFrontImage)} />
-            <ImageInput label="Back Product Image (Optional)" file={backImage} onChange={(files) => selectProductReference(files, setBackImage)} />
+          <div
+            className={`rounded-lg px-3 py-2 text-xs ${
+              isUsingSavedDraftReferences
+                ? "border border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border border-amber-200 bg-amber-50 text-amber-800"
+            }`}
+          >
+            {isUsingSavedDraftReferences
+              ? "Using saved draft references. You can generate images without uploading again."
+              : "Custom reference for this generation. New images will override the saved draft references only for this job."}
           </div>
-        )}
+        </div>
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-zinc-500">
             {effectiveFrontImage ? `Front: ${effectiveFrontImage.name}` : "Front image is required before generate."}
-            {effectiveBackImage ? ` Back: ${effectiveBackImage.name}` : " Back image is optional."}
+            {effectiveBackImage ? ` Back: ${effectiveBackImage.name}` : " Back image not provided. Front-only generation is supported."}
           </div>
           <div className="flex flex-wrap gap-2">
             {effectiveFrontImage ? (
               <Button type="button" variant="outline" onClick={() => setIsEditingReferences((current) => !current)}>
-                {isEditingReferences ? "Keep current references" : "Replace references"}
+                {isEditingReferences ? "Hide override controls" : "Replace references"}
               </Button>
             ) : null}
             <Button
@@ -1302,17 +1340,38 @@ function ImageInput({
   required,
   file,
   onChange,
+  helperText,
+  badgeLabel,
+  badgeTone = "emerald",
+  emptyLabel = "JPG, PNG, WEBP",
+  resetLabel,
+  onReset,
 }: {
   label: string;
   required?: boolean;
   file: File | null;
   onChange: (files: FileList | null) => void;
+  helperText?: string;
+  badgeLabel?: string;
+  badgeTone?: "emerald" | "amber";
+  emptyLabel?: string;
+  resetLabel?: string;
+  onReset?: () => void;
 }) {
+  const badgeClassName = badgeTone === "amber"
+    ? "border border-amber-200 bg-amber-50 text-amber-700"
+    : "border border-emerald-200 bg-emerald-50 text-emerald-700";
+
   return (
     <label className="group flex min-h-40 cursor-pointer flex-col overflow-hidden rounded-lg border border-dashed border-zinc-300 bg-white text-center transition-colors hover:border-brand hover:bg-indigo-50/40">
       {file ? (
         <div className="relative h-32 w-full bg-zinc-100">
           <FilePreviewImage file={file} className="h-full w-full object-contain p-1" alt={label} />
+          {badgeLabel ? (
+            <div className={`absolute left-2 top-2 rounded-full px-2 py-1 text-[11px] font-semibold ${badgeClassName}`}>
+              {badgeLabel}
+            </div>
+          ) : null}
           <div className="absolute inset-x-0 bottom-0 bg-black/65 px-2 py-1 text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
             Click to replace
           </div>
@@ -1320,14 +1379,28 @@ function ImageInput({
       ) : (
         <div className="flex h-32 flex-col items-center justify-center p-3">
           <ImagePlus size={24} className="mb-2 text-zinc-400" />
-          <span className="text-xs text-zinc-500">JPG, PNG, WEBP</span>
+          <span className="text-xs text-zinc-500">{emptyLabel}</span>
         </div>
       )}
       <div className="flex min-h-14 flex-col justify-center px-3 py-2">
         <span className="text-sm font-medium text-zinc-800">
           {label} {required && <span className="text-brand">*</span>}
         </span>
-        {file && <span className="mt-1 line-clamp-1 text-xs text-zinc-500">{file.name}</span>}
+        {file ? <span className="mt-1 line-clamp-1 text-xs text-zinc-500">{file.name}</span> : null}
+        {helperText ? <span className="mt-1 text-xs text-zinc-500">{helperText}</span> : null}
+        {resetLabel && onReset ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onReset();
+            }}
+            className="mt-2 text-xs font-medium text-brand hover:underline"
+          >
+            {resetLabel}
+          </button>
+        ) : null}
       </div>
       <input
         type="file"

@@ -33,6 +33,12 @@ cd backend
 python -m app.workers.image_generation_worker
 ```
 
+Run the RabbitMQ sync worker for card push, product sync, and finance sync:
+
+```powershell
+python -m app.workers.wb_sync_worker
+```
+
 ## Database
 
 Default local database is PostgreSQL:

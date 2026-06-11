@@ -46,12 +46,13 @@ class CardGenerator:
         analysis: ImageAnalysis,
         subject: dict[str, Any],
         charcs: list[dict[str, Any]],
+        garment_json: dict[str, Any] | None = None,
     ) -> list[CardUploadGroup]:
         fallback_intent = ProductIntentParser.parse(user_input.note)
         gemini_intent = ProductIntentParser.from_analysis(analysis)
         intent = gemini_intent.merge_missing(fallback_intent)
         if self._client and self._model:
-            return self._generate_with_openai(user_input, analysis, subject, charcs, intent)
+            return self._generate_with_openai(user_input, analysis, subject, charcs, intent, garment_json or {})
         return self._generate_fallback(user_input, analysis, subject, charcs, intent)
 
     def _generate_with_openai(
@@ -61,12 +62,14 @@ class CardGenerator:
         subject: dict[str, Any],
         charcs: list[dict[str, Any]],
         intent: ProductIntent,
+        garment_json: dict[str, Any],
     ) -> list[CardUploadGroup]:
         user_payload = {
             "task": "generate_wildberries_product_card",
             "user_input": user_input.model_dump(),
             "extracted_user_intent": self._intent_payload(intent),
             "image_analysis": analysis.model_dump(),
+            "garment_analysis": garment_json,
             "category_context": {
                 "subjectID": subject["subjectID"],
                 "subjectName": subject.get("subjectName"),

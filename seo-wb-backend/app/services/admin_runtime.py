@@ -56,11 +56,12 @@ def list_public_model_templates(db: Session, settings: Settings, garment_type: s
     )
     if garment_type:
         from sqlalchemy import or_
+
         query = query.where(
             or_(
                 ModelTemplate.garment_type == garment_type,
                 ModelTemplate.garment_type == "full_body",
-                ModelTemplate.garment_type.is_(None)
+                ModelTemplate.garment_type.is_(None),
             )
         )
     rows = db.scalars(query.order_by(ModelTemplate.created_at.desc())).all()
@@ -99,7 +100,7 @@ def _public_model_item(model: ModelTemplate) -> dict:
         "frontImageUrl": front_image_url,
         "imageUrl": front_image_url,
         "label": f"{gender} - {body_type}",
-        "description": " • ".join(description_parts) if description_parts else model.name,
+        "description": " - ".join(description_parts) if description_parts else model.name,
         "availablePoses": available_poses,
         "isAiGenerated": bool(model.is_ai_generated),
         "garmentType": model.garment_type or "full_body",
