@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useStore } from "@/contexts/StoreContext";
 import { api } from "@/lib/api";
+import { FINANCE_ENABLED } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
 type UsageSummary = {
@@ -114,13 +115,13 @@ export default function DashboardPage() {
       desc: t("createCardDesc"),
       href: sid ? `/cards/new?store_id=${sid}` : "/cards/new",
     },
-    {
+    ...(FINANCE_ENABLED ? [{
       icon: BarChart2,
       color: "bg-emerald-50 text-emerald-600",
       title: t("viewFinance"),
       desc: t("viewFinanceDesc"),
       href: "/finance",
-    },
+    }] : []),
     {
       icon: Settings,
       color: "bg-zinc-100 text-zinc-600",

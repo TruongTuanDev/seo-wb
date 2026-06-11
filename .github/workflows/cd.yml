@@ -89,6 +89,7 @@ jobs:
           FRONTEND_HTTP_PORT: ${{ secrets.FRONTEND_HTTP_PORT }}
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
           NEXT_PUBLIC_CSRF_COOKIE_NAME: ${{ secrets.NEXT_PUBLIC_CSRF_COOKIE_NAME }}
+          NEXT_PUBLIC_ENABLE_FINANCE: ${{ secrets.NEXT_PUBLIC_ENABLE_FINANCE }}
           APP_NAME: ${{ secrets.APP_NAME }}
           APP_ENV: ${{ secrets.APP_ENV }}
           APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
@@ -169,6 +170,7 @@ jobs:
           write_env .tmp-deploy/compose.env FRONTEND_HTTP_PORT "${FRONTEND_HTTP_PORT:-3000}"
           write_env .tmp-deploy/compose.env NEXT_PUBLIC_API_URL "${NEXT_PUBLIC_API_URL}"
           write_env .tmp-deploy/compose.env NEXT_PUBLIC_CSRF_COOKIE_NAME "${NEXT_PUBLIC_CSRF_COOKIE_NAME:-seller_wb_csrf}"
+          write_env .tmp-deploy/compose.env NEXT_PUBLIC_ENABLE_FINANCE "${NEXT_PUBLIC_ENABLE_FINANCE:-false}"
 
           : > .tmp-deploy/backend.env
           write_env .tmp-deploy/backend.env APP_NAME "${APP_NAME:-Seller WB AI Backend}"

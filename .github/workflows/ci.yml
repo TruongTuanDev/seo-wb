@@ -70,6 +70,7 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: https://api.example.com/api/v1
           NEXT_PUBLIC_CSRF_COOKIE_NAME: seller_wb_csrf
+          NEXT_PUBLIC_ENABLE_FINANCE: "false"
         run: npm run build
 
   production-compose-validate:

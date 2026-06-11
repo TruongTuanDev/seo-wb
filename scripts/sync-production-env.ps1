@@ -162,7 +162,8 @@ $composeOrder = @(
     "FRONTEND_BIND_ADDRESS",
     "FRONTEND_HTTP_PORT",
     "NEXT_PUBLIC_API_URL",
-    "NEXT_PUBLIC_CSRF_COOKIE_NAME"
+    "NEXT_PUBLIC_CSRF_COOKIE_NAME",
+    "NEXT_PUBLIC_ENABLE_FINANCE"
 )
 
 $backendEnv = @{}
@@ -218,6 +219,7 @@ $composeEnv["FRONTEND_BIND_ADDRESS"] = "127.0.0.1"
 $composeEnv["FRONTEND_HTTP_PORT"] = if ($composeEnv.ContainsKey("FRONTEND_HTTP_PORT")) { $composeEnv["FRONTEND_HTTP_PORT"] } else { "3000" }
 $composeEnv["NEXT_PUBLIC_API_URL"] = "https://$ApiDomain/api/v1"
 $composeEnv["NEXT_PUBLIC_CSRF_COOKIE_NAME"] = if ($backendEnv.ContainsKey("CSRF_COOKIE_NAME")) { $backendEnv["CSRF_COOKIE_NAME"] } else { "seller_wb_csrf" }
+$composeEnv["NEXT_PUBLIC_ENABLE_FINANCE"] = if ($existingComposeEnv.ContainsKey("NEXT_PUBLIC_ENABLE_FINANCE")) { $existingComposeEnv["NEXT_PUBLIC_ENABLE_FINANCE"] } else { "false" }
 
 Write-EnvFile -Path $backendEnvPath -Data $backendEnv -Order $backendOrder
 Write-EnvFile -Path $composeEnvPath -Data $composeEnv -Order $composeOrder

@@ -10,7 +10,7 @@ import { useToast } from "@/contexts/ToastContext";
 import { useStore } from "@/contexts/StoreContext";
 import { financeApi } from "@/lib/finance-api";
 import { SyncStatusBadge } from "@/components/finance/SyncStatusBadge";
-import type { WbProduct, FinanceSystemStatus, ProductSyncStatus } from "@/lib/types/finance";
+import type { WbProduct, ProductSyncStatus } from "@/lib/types/finance";
 import { cn } from "@/lib/utils";
 
 interface DraftCard {
@@ -103,7 +103,6 @@ function ProductCardsContent() {
   const [wbHasMore, setWbHasMore] = useState(false);
 
   // Sync Manager state
-  const [systemStatus, setSystemStatus] = useState<FinanceSystemStatus | null>(null);
   const [productSyncStatus, setProductSyncStatus] = useState<ProductSyncStatus | null>(null);
   const [syncingProducts, setSyncingProducts] = useState(false);
 
@@ -171,11 +170,7 @@ function ProductCardsContent() {
   const fetchSyncStatus = useCallback(async (targetStoreId = storeId) => {
     if (!targetStoreId) return;
     try {
-      const [status, pSync] = await Promise.all([
-        financeApi.getSystemStatus(targetStoreId),
-        financeApi.getProductSyncStatus(targetStoreId),
-      ]);
-      setSystemStatus(status);
+      const pSync = await financeApi.getProductSyncStatus(targetStoreId);
       setProductSyncStatus(pSync);
     } catch {
       // Non-blocking log
@@ -184,10 +179,6 @@ function ProductCardsContent() {
 
   const handleProductSync = async () => {
     if (!storeId) return;
-    if (systemStatus?.contentApi.inCooldown) {
-      error("Cooldown active", "Content API is in cooldown. Please wait.");
-      return;
-    }
     setSyncingProducts(true);
     try {
       await financeApi.triggerProductSync(storeId);
@@ -392,8 +383,7 @@ function ProductCardsContent() {
 
   const productSyncDisabled =
     syncingProducts ||
-    productSyncStatus?.status === "running" ||
-    systemStatus?.contentApi.inCooldown === true;
+    productSyncStatus?.status === "running";
 
   return (
     <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">

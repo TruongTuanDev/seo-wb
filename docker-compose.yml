@@ -124,11 +124,13 @@ services:
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_API_URL=http://localhost:8081/api/v1
+        - NEXT_PUBLIC_ENABLE_FINANCE=false
     restart: unless-stopped
     ports:
       - "3030:3000" # Map frontend to 3030 to avoid conflict with port 3000
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8081/api/v1
+      - NEXT_PUBLIC_ENABLE_FINANCE=false
 
 volumes:
   postgres_data:

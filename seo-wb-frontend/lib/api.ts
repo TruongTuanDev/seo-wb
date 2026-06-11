@@ -1,3 +1,5 @@
+import { FINANCE_ENABLED } from "@/lib/features";
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 const CSRF_COOKIE_NAME = process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME || "seller_wb_csrf";
 const ADMIN_CSRF_COOKIE_NAME = process.env.NEXT_PUBLIC_ADMIN_CSRF_COOKIE_NAME || "seller_wb_admin_csrf";
@@ -17,6 +19,10 @@ function readCookie(name: string) {
 }
 
 async function fetchWithAuth(url: string, options: ApiOptions = {}) {
+  if (!FINANCE_ENABLED && (url === "/finance" || url.startsWith("/finance/") || url.startsWith("/finance?"))) {
+    throw new Error("Finance feature is currently unavailable.");
+  }
+
   const { requireAuth = true, redirectOnUnauthorized = true, authScope, headers, ...rest } = options;
 
   const finalHeaders = new Headers(headers);

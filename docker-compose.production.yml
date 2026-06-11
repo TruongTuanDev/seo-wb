@@ -194,11 +194,13 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
         NEXT_PUBLIC_CSRF_COOKIE_NAME: ${NEXT_PUBLIC_CSRF_COOKIE_NAME:-seller_wb_csrf}
+        NEXT_PUBLIC_ENABLE_FINANCE: ${NEXT_PUBLIC_ENABLE_FINANCE:-false}
     restart: unless-stopped
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       NEXT_PUBLIC_CSRF_COOKIE_NAME: ${NEXT_PUBLIC_CSRF_COOKIE_NAME:-seller_wb_csrf}
+      NEXT_PUBLIC_ENABLE_FINANCE: ${NEXT_PUBLIC_ENABLE_FINANCE:-false}
     depends_on:
       backend:
         condition: service_healthy
