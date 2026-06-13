@@ -171,7 +171,7 @@ class CardPayloadEnricher:
             "season": self._first(attrs, ["Сезон"]) or (analysis.season if analysis else None),
             "fit": self._first(attrs, ["Тип посадки"]) or self._fit_value(analysis.fit_type if analysis else None, all_text),
             "pants_model": self._first(attrs, ["Модель брюк", "Покрой"]) or self._pants_model(all_text),
-            "closure": self._first(attrs, ["Вид застежки"]) or self._closure(all_text),
+            "closure": self._first(attrs, ["Вид застежки"]) or self._closure(all_text, subject_id=subject_id),
             "pockets": self._first(attrs, ["Тип карманов"]) or self._pockets(all_text),
             "features": self._first(attrs, ["Особенности модели"]) or self._features(features),
             "purpose": self._first(attrs, ["Назначение", "purpose"]) or self._default_purpose(all_text),
@@ -180,7 +180,7 @@ class CardPayloadEnricher:
             "age_limits": self._first(attrs, ["Возрастные ограничения", "age_limits"]),
             "insulation": self._first(attrs, ["Утеплитель"]) or "без утеплителя",
             "care": self._first(attrs, ["Уход за вещами"]) or self._care_value(all_text),
-            "pattern": self._first(attrs, ["Рисунок"]) or self._pattern_value(all_text),
+            "pattern": self._first(attrs, ["Рисунок"]) or self._pattern_value(all_text, subject_id=subject_id),
             "texture": self._first(attrs, ["Фактура материала"]) or self._texture_value(attrs, analysis, all_text),
             "growth_type": self._first(attrs, ["Тип ростовки"]) or "для среднего роста",
             "decor": self._first(attrs, ["Декоративные элементы"]) or self._decor_value(all_text),
@@ -359,7 +359,7 @@ class CardPayloadEnricher:
         return None
 
     @staticmethod
-    def _closure(text: str) -> str | None:
+    def _closure(text: str, *, subject_id: int | None = None) -> str | None:
         values = []
         if "молни" in text:
             values.append("молния")
@@ -367,6 +367,8 @@ class CardPayloadEnricher:
             values.append("пуговицы")
         if "резин" in text:
             values.append("резинка")
+        if not values and subject_id == 11:
+            values.append("молния")
         return "; ".join(values) if values else None
 
     @staticmethod
@@ -403,13 +405,15 @@ class CardPayloadEnricher:
         return "бережная стирка; не отбеливать; гладить при низкой температуре"
 
     @staticmethod
-    def _pattern_value(text: str) -> str:
+    def _pattern_value(text: str, *, subject_id: int | None = None) -> str:
         if "полоск" in text:
             return "полоска"
         if "клет" in text:
             return "клетка"
         if "принт" in text or "рисун" in text:
             return "принт"
+        if subject_id == 11:
+            return "без рисунка"
         return "без рисунка"
 
     @staticmethod

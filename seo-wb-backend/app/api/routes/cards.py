@@ -171,6 +171,13 @@ def _runtime_config(db: Session, settings: Settings) -> dict[str, Any]:
         "seo_repair_max_attempts": runtime.seo_repair_max_attempts,
         "require_primary_keyword_in_title": runtime.require_primary_keyword_in_title,
         "warn_low_confidence_attributes": runtime.warn_low_confidence_attributes,
+        "enable_russian_grammar_validation": runtime.enable_russian_grammar_validation,
+        "enable_keyword_stuffing_detection": runtime.enable_keyword_stuffing_detection,
+        "enable_subject_title_templates": runtime.enable_subject_title_templates,
+        "include_gender_in_title": runtime.include_gender_in_title,
+        "minimum_grammar_score": runtime.minimum_grammar_score,
+        "minimum_marketplace_score": runtime.minimum_marketplace_score,
+        "minimum_critical_attribute_score": runtime.minimum_critical_attribute_score,
     }
 
 
@@ -1677,6 +1684,7 @@ async def _recompute_draft_seo(
                     CardGenerator._title_attributes(product_input, analysis_model, subject, seo_keyword_plan, attribute_confidence),
                     seo_keyword_plan,
                     brand=(product_input.brand or "").strip() or None,
+                    include_gender_in_title=runtime.include_gender_in_title,
                 )
                 variant["title"] = cleanup_title(
                     str(title_payload.get("title") or variant.get("title") or ""),

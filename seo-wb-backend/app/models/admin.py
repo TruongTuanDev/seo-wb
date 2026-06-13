@@ -100,6 +100,13 @@ class AdminAiSettings(Base):
     seo_repair_max_attempts: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     require_primary_keyword_in_title: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     warn_low_confidence_attributes: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    enable_russian_grammar_validation: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    enable_keyword_stuffing_detection: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    enable_subject_title_templates: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    include_gender_in_title: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    minimum_grammar_score: Mapped[int] = mapped_column(Integer, default=70, nullable=False)
+    minimum_marketplace_score: Mapped[int] = mapped_column(Integer, default=70, nullable=False)
+    minimum_critical_attribute_score: Mapped[int] = mapped_column(Integer, default=80, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

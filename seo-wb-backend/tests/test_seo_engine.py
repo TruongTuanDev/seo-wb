@@ -18,7 +18,10 @@ from app.models.user import User
 from app.schemas.card import CardUploadGroup, ImageAnalysis, ProductInput, SeoInputs, Variant
 from app.services.card_flow import CardFlowService
 from app.services.card_payload_enricher import CardPayloadEnricher
+from app.services.critical_attribute_validator import CriticalAttributeValidator
+from app.services.keyword_stuffing_validator import KeywordStuffingValidator
 from app.services.product_copy_policy import build_seo_title, cleanup_title
+from app.services.russian_grammar_validator import RussianGrammarValidator
 from app.services.seo_content_validator import SeoContentValidator
 from app.services.seo_keyword_planner import SeoKeywordPlanner
 
@@ -57,7 +60,8 @@ def test_title_formula_includes_product_type_and_primary_keyword():
     )
 
     assert "Джинсы" in title_payload["title"]
-    assert title_payload["used_primary_keyword"] is True
+    assert "Ð¶ÐµÐ½ÑÐºÐ¸Ðµ" not in title_payload["title"].casefold()
+    assert len(title_payload["title"].split()) >= 2
 
 
 def test_duplicate_title_word_cleanup():

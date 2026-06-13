@@ -173,6 +173,13 @@ class AdminAiSettingsResponse(BaseModel):
     seo_repair_max_attempts: int
     require_primary_keyword_in_title: bool
     warn_low_confidence_attributes: bool
+    enable_russian_grammar_validation: bool
+    enable_keyword_stuffing_detection: bool
+    enable_subject_title_templates: bool
+    include_gender_in_title: bool
+    minimum_grammar_score: int
+    minimum_marketplace_score: int
+    minimum_critical_attribute_score: int
     openai_configured: bool
     fal_configured: bool
     gemini_configured: bool
@@ -195,6 +202,13 @@ class AdminAiSettingsUpdateRequest(BaseModel):
     seo_repair_max_attempts: int = Field(default=1, ge=0, le=3)
     require_primary_keyword_in_title: bool = True
     warn_low_confidence_attributes: bool = True
+    enable_russian_grammar_validation: bool = True
+    enable_keyword_stuffing_detection: bool = True
+    enable_subject_title_templates: bool = True
+    include_gender_in_title: bool = False
+    minimum_grammar_score: int = Field(default=70, ge=0, le=100)
+    minimum_marketplace_score: int = Field(default=70, ge=0, le=100)
+    minimum_critical_attribute_score: int = Field(default=80, ge=0, le=100)
 
 
 class UsageRecordResponse(BaseModel):

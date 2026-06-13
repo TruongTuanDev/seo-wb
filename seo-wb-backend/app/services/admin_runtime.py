@@ -27,6 +27,13 @@ class EffectiveAiRuntimeSettings:
     seo_repair_max_attempts: int
     require_primary_keyword_in_title: bool
     warn_low_confidence_attributes: bool
+    enable_russian_grammar_validation: bool
+    enable_keyword_stuffing_detection: bool
+    enable_subject_title_templates: bool
+    include_gender_in_title: bool
+    minimum_grammar_score: int
+    minimum_marketplace_score: int
+    minimum_critical_attribute_score: int
 
 
 def get_or_create_admin_ai_settings(db: Session) -> AdminAiSettings:
@@ -59,6 +66,13 @@ def get_effective_ai_runtime_settings(db: Session, settings: Settings) -> Effect
         seo_repair_max_attempts=max(0, row.seo_repair_max_attempts),
         require_primary_keyword_in_title=bool(row.require_primary_keyword_in_title),
         warn_low_confidence_attributes=bool(row.warn_low_confidence_attributes),
+        enable_russian_grammar_validation=bool(row.enable_russian_grammar_validation),
+        enable_keyword_stuffing_detection=bool(row.enable_keyword_stuffing_detection),
+        enable_subject_title_templates=bool(row.enable_subject_title_templates),
+        include_gender_in_title=bool(row.include_gender_in_title),
+        minimum_grammar_score=max(0, min(100, row.minimum_grammar_score)),
+        minimum_marketplace_score=max(0, min(100, row.minimum_marketplace_score)),
+        minimum_critical_attribute_score=max(0, min(100, row.minimum_critical_attribute_score)),
     )
 
 

@@ -275,6 +275,10 @@ class CardFlowService:
         min_score = int(getattr(runtime_settings, "seo_min_score", 70) or 70)
         repair_attempts = max(0, int(getattr(runtime_settings, "seo_repair_max_attempts", 1) or 0))
         require_primary_keyword_in_title = bool(getattr(runtime_settings, "require_primary_keyword_in_title", True))
+        include_gender_in_title = bool(getattr(runtime_settings, "include_gender_in_title", False))
+        min_grammar_score = int(getattr(runtime_settings, "minimum_grammar_score", 70) or 70)
+        min_marketplace_score = int(getattr(runtime_settings, "minimum_marketplace_score", 70) or 70)
+        min_critical_attribute_score = int(getattr(runtime_settings, "minimum_critical_attribute_score", 80) or 80)
         scorecards: list[dict[str, Any]] = []
         for group in payload:
             for variant in group.get("variants", []) or []:
@@ -314,6 +318,7 @@ class CardFlowService:
                             title_attributes,
                             seo_keyword_plan,
                             brand=(user_input.brand or "").strip() or None,
+                            include_gender_in_title=include_gender_in_title,
                         )
                         title = cleanup_title(
                             str(rebuilt_title.get("title") or title),
@@ -332,7 +337,22 @@ class CardFlowService:
                         max_chars=max_chars,
                         auto_fix=False,
                     )
-                    if final_validator_result.get("score", 0) >= min_score and final_validator_result.get("valid", False):
+                    candidate_scorecard = SeoContentValidator.build_scorecard(
+                        title=title,
+                        description=description,
+                        seo_keyword_plan=seo_keyword_plan,
+                        validator_result=final_validator_result,
+                        confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+                        inferred_attributes=attribute_confidence.get("inferred_attributes"),
+                        subject_name=(subject or {}).get("subjectName"),
+                    )
+                    if (
+                        candidate_scorecard.get("seo_score", 0) >= min_score
+                        and candidate_scorecard.get("grammar_score", 0) >= min_grammar_score
+                        and candidate_scorecard.get("marketplace_score", 0) >= min_marketplace_score
+                        and candidate_scorecard.get("critical_attribute_score", 0) >= min_critical_attribute_score
+                        and final_validator_result.get("valid", False)
+                    ):
                         break
 
                     if attempt >= repair_attempts:
@@ -345,6 +365,7 @@ class CardFlowService:
                             title_attributes,
                             seo_keyword_plan,
                             brand=(user_input.brand or "").strip() or None,
+                            include_gender_in_title=include_gender_in_title,
                         )
                         title = cleanup_title(
                             str(rebuilt_title.get("title") or title),
@@ -376,6 +397,7 @@ class CardFlowService:
                         validator_result=validator_result,
                         confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
                         inferred_attributes=attribute_confidence.get("inferred_attributes"),
+                        subject_name=(subject or {}).get("subjectName"),
                     )
                 )
         if not scorecards:
@@ -395,6 +417,10 @@ class CardFlowService:
             "description_score": int(round(sum(item["description_score"] for item in scorecards) / len(scorecards))),
             "attributes_score": int(round(sum(item["attributes_score"] for item in scorecards) / len(scorecards))),
             "keyword_coverage_score": int(round(sum(item["keyword_coverage_score"] for item in scorecards) / len(scorecards))),
+            "keyword_score": int(round(sum(item.get("keyword_score", 0) for item in scorecards) / len(scorecards))),
+            "grammar_score": int(round(sum(item.get("grammar_score", 0) for item in scorecards) / len(scorecards))),
+            "marketplace_score": int(round(sum(item.get("marketplace_score", 0) for item in scorecards) / len(scorecards))),
+            "critical_attribute_score": int(round(sum(item.get("critical_attribute_score", 0) for item in scorecards) / len(scorecards))),
             "issues": [],
             "suggestions": [],
             "status": "poor",

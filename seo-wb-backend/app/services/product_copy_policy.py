@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.schemas.card import ImageAnalysis, ProductInput
+from app.services.title_template_registry import TitleTemplateRegistry
 
 
 @dataclass(frozen=True)
@@ -140,6 +141,7 @@ def build_seo_title(
     attributes: dict[str, Any] | None,
     seo_keyword_plan: dict[str, Any] | None,
     brand: str | None = None,
+    include_gender_in_title: bool = False,
 ) -> dict[str, Any]:
     attributes = attributes or {}
     seo_keyword_plan = seo_keyword_plan or {}
@@ -152,29 +154,30 @@ def build_seo_title(
     quantity = _pick_attribute(attributes, "quantity_in_set", "quantity")
     key_feature = _pick_attribute(attributes, "key_feature", "feature")
 
-    pieces: list[str] = []
-    if primary_keyword:
-        pieces.extend(primary_keyword.split())
-    else:
-        if subject:
-            pieces.append(subject)
-        if gender:
-            pieces.append(str(gender).strip())
-    for candidate in [fit, material, color, season, key_feature]:
-        if candidate:
-            pieces.extend(_normalize_spaces(candidate).split()[:4])
-    if quantity:
-        quantity_text = _normalize_spaces(quantity)
-        if re.search(r"\d", quantity_text):
-            pieces.extend(["набор", quantity_text, "шт"])
-
-    tokens = _dedupe_tokens(pieces)
-    if subject:
-        subject_tokens = _normalize_spaces(subject).split()
-        for token in reversed(subject_tokens):
-            if token not in tokens:
-                tokens.insert(0, token)
-    title = cleanup_title(" ".join(tokens), subject or "Товар", None, None)
+    registry_attributes = {
+        "main_attribute": _pick_attribute(attributes, "pants_model", "model") or fit or key_feature or material,
+        "fit": fit,
+        "secondary_attribute": key_feature or color or season or material,
+        "material": material,
+        "color": color,
+        "rise": fit,
+        "decor": _pick_attribute(attributes, "decor", "pattern"),
+        "length": _pick_attribute(attributes, "length", "Длина изделия"),
+        "occasion": _pick_attribute(attributes, "purpose", "occasion"),
+        "construction": _pick_attribute(attributes, "construction", "feature"),
+        "support": _pick_attribute(attributes, "support", "model"),
+        "model": _pick_attribute(attributes, "pants_model", "model"),
+        "quantity_in_set": quantity,
+        "hood_feature": key_feature or fit,
+    }
+    title = TitleTemplateRegistry.build_title(
+        subject_name=subject or "Товар",
+        attributes=registry_attributes,
+        include_gender_in_title=include_gender_in_title,
+        gender=gender,
+    )
+    if not title and primary_keyword:
+        title = primary_keyword
     used_primary_keyword = bool(primary_keyword and _normalize_spaces(primary_keyword).casefold() in title.casefold())
     used_secondary_keywords = []
     for keyword in seo_keyword_plan.get("secondary_keywords", []) or []:
@@ -284,6 +287,26 @@ def render_description(
             text = _normalize_spaces(text)
         return text[:1000]
 
+    if policy.family == "bottoms":
+        opening = f"Широкие джинсы из {material} сочетают комфорт, актуальный силуэт и удобство на каждый день."
+        benefits = (
+            "Модель помогает создать современный расслабленный образ, а высокая посадка подчеркивает талию "
+            "и делает посадку более удобной в движении."
+        )
+        if color:
+            benefits += f" Голубой оттенок {color if color != 'голубой' else 'денима'} легко сочетается с футболками, худи и базовыми топами."
+        if feature_text:
+            benefits += f" Детали модели, включая {feature_text}, добавляют образу выразительность без перегруженного декора."
+        use_case_sentence = (
+            f"Такие джинсы подходят для сценариев {use_cases} и хорошо работают как базовая модель на сезонную и повседневную носку."
+        )
+        closing = "Уход: бережная стирка при 30 градусах, не отбеливать, гладить при низкой температуре."
+        text = _normalize_spaces(" ".join([opening, benefits, use_case_sentence, closing]))
+        while len(text) < 420:
+            text += " " + "Свободный крой сохраняет комфорт в течение дня, а плотный материал помогает модели держать аккуратную форму после носки."
+            text = _normalize_spaces(text)
+        return text[:1000]
+
     opening = f"{product_name[:1].upper() + product_name[1:]} из {material} подходит {audience}."
     benefits = f"Модель делает акцент на таких качествах, как {focus_text}, поэтому остается удобной в течение дня."
     if color:
@@ -306,9 +329,30 @@ def suggest_characteristics(
     user_input: ProductInput | None,
 ) -> dict[str, list[str] | str]:
     policy = resolve_product_family(subject, analysis, user_input)
+    source = " ".join(
+        str(part or "")
+        for part in [
+            subject.get("subjectName") if subject else "",
+            analysis.category if analysis else "",
+            analysis.product_name if analysis else "",
+            user_input.category if user_input else "",
+            user_input.note if user_input else "",
+            " ".join(analysis.features if analysis and analysis.features else []),
+        ]
+    ).casefold()
     suggestions: dict[str, list[str] | str] = {}
     for alias, values in policy.seo_characteristics.items():
         suggestions[alias] = values
+
+    if any(token in source for token in ["джинс", "jeans"]):
+        if "wide" in source or "шир" in source:
+            suggestions.setdefault("pants_model", "широкие")
+        elif "прям" in source:
+            suggestions.setdefault("pants_model", "прямые")
+        suggestions.setdefault("closure", "молния")
+        suggestions.setdefault("pattern", "без рисунка")
+        if any(token in source for token in ["рван", "дыр", "distress"]):
+            suggestions.setdefault("decor", "рваные элементы")
 
     age_hint = _extract_age_hint(analysis, user_input)
     if age_hint:

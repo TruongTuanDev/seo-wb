@@ -1,6 +1,10 @@
 import re
 from typing import Any
 
+from app.services.critical_attribute_validator import CriticalAttributeValidator
+from app.services.keyword_stuffing_validator import KeywordStuffingValidator
+from app.services.russian_grammar_validator import RussianGrammarValidator
+
 
 class SeoContentValidator:
     @classmethod
@@ -43,6 +47,10 @@ class SeoContentValidator:
             issues.append("Not enough secondary or long-tail keyword coverage")
             suggestions.append("Add 2-3 secondary search phrases naturally")
 
+        if "актуальные поисковые фразы" in current_description.casefold():
+            issues.append("Keyword block pattern is forbidden")
+            suggestions.append("Remove keyword list blocks and keep phrases natural")
+
         material = cls._attr(confirmed_attributes, inferred_attributes, "composition", "Состав", "material")
         fit = cls._attr(confirmed_attributes, inferred_attributes, "fit", "Тип посадки", "Покрой")
         purpose = cls._attr(confirmed_attributes, inferred_attributes, "purpose", "Назначение")
@@ -78,6 +86,7 @@ class SeoContentValidator:
         fixed_description = current_description
         if auto_fix and issues:
             fixed_description = cls._auto_fix(
+                title=title,
                 description=current_description,
                 primary_keyword=primary_keyword,
                 keyword_pool=keyword_pool[1:],
@@ -118,32 +127,74 @@ class SeoContentValidator:
         validator_result: dict[str, Any],
         confirmed_attributes: dict[str, Any] | None,
         inferred_attributes: dict[str, Any] | None,
+        subject_name: str | None = None,
     ) -> dict[str, Any]:
         primary_keyword = cls._normalize(seo_keyword_plan.get("primary_keyword"))
         secondary_keywords = [cls._normalize(item) for item in seo_keyword_plan.get("secondary_keywords", []) if cls._normalize(item)]
-        title_score = 88 if primary_keyword and cls._contains_phrase(title, primary_keyword) else 70
+        title_score = 88 if primary_keyword and cls._contains_phrase(title, primary_keyword) else 50
         description_score = int(validator_result.get("score") or 0)
         keyword_hits = sum(1 for item in secondary_keywords if cls._contains_phrase(description, item))
         keyword_coverage_score = min(100, 55 + keyword_hits * 12 + (15 if primary_keyword and cls._contains_phrase(description, primary_keyword) else 0))
+        keyword_score = keyword_coverage_score
         confirmed_count = len([value for value in (confirmed_attributes or {}).values() if value])
         inferred_count = len([value for value in (inferred_attributes or {}).values() if value])
         attributes_score = max(40, min(100, 55 + confirmed_count * 6 - max(0, inferred_count - confirmed_count) * 2))
-        seo_score = int(round((title_score + description_score + keyword_coverage_score + attributes_score) / 4))
+        grammar_result = RussianGrammarValidator.validate(title)
+        stuffing_result = KeywordStuffingValidator.validate(title)
+        critical_result = CriticalAttributeValidator.validate(
+            subject_name=subject_name,
+            confirmed_attributes=confirmed_attributes,
+            inferred_attributes=inferred_attributes,
+        )
+        grammar_score = grammar_result["grammar_score"]
+        critical_attribute_score = critical_result["critical_score"]
+        keyword_score = max(0, int(round((keyword_score * 0.6) + (stuffing_result["keyword_stuffing_score"] * 0.4))))
+        marketplace_score = int(round(
+            (title_score * 0.25)
+            + (grammar_score * 0.30)
+            + (critical_attribute_score * 0.20)
+            + (keyword_coverage_score * 0.15)
+            + (attributes_score * 0.10)
+        ))
+        seo_score = int(round(
+            (grammar_score * 0.30)
+            + (marketplace_score * 0.30)
+            + (critical_attribute_score * 0.20)
+            + (description_score * 0.10)
+            + (keyword_score * 0.10)
+        ))
         status = "excellent" if seo_score >= 85 else "good" if seo_score >= 70 else "needs_review" if seo_score >= 50 else "poor"
+        issues = [
+            *validator_result.get("issues", []),
+            *grammar_result.get("issues", []),
+            *stuffing_result.get("density_issues", []),
+            *[f'Critical attribute "{name}" is missing.' for name in critical_result.get("missing_critical_attributes", [])],
+        ]
+        suggestions = [
+            *validator_result.get("suggestions", []),
+            *grammar_result.get("warnings", []),
+        ]
         return {
             "seo_score": seo_score,
             "title_score": int(title_score),
             "description_score": int(description_score),
             "attributes_score": int(attributes_score),
             "keyword_coverage_score": int(keyword_coverage_score),
-            "issues": validator_result.get("issues", []),
-            "suggestions": validator_result.get("suggestions", []),
+            "keyword_score": int(keyword_score),
+            "grammar_score": int(grammar_score),
+            "marketplace_score": int(marketplace_score),
+            "critical_attribute_score": int(critical_attribute_score),
+            "keyword_stuffing_score": int(stuffing_result["keyword_stuffing_score"]),
+            "missing_critical_attributes": critical_result.get("missing_critical_attributes", []),
+            "issues": cls._dedupe(issues),
+            "suggestions": cls._dedupe(suggestions),
             "status": status,
         }
 
     @staticmethod
     def _auto_fix(
         *,
+        title: str,
         description: str,
         primary_keyword: str,
         keyword_pool: list[str],
@@ -156,8 +207,8 @@ class SeoContentValidator:
         max_chars: int,
     ) -> str:
         result = description
-        if primary_keyword and not SeoContentValidator._contains_phrase(result, primary_keyword):
-            result = f"{primary_keyword[:1].upper() + primary_keyword[1:]} {result}".strip()
+        if title and not SeoContentValidator._contains_phrase(result, title):
+            result = f"{title}. {result}".strip()
         additions: list[str] = []
         if material and not SeoContentValidator._contains_any_token(result, material):
             additions.append(f"Материал: {material}.")
@@ -165,9 +216,6 @@ class SeoContentValidator:
             additions.append(f"Посадка и силуэт: {fit}.")
         if purpose and not SeoContentValidator._contains_any_token(result, purpose):
             additions.append(f"Подходит для сценариев: {purpose}.")
-        missing_keywords = [item for item in keyword_pool if item and not SeoContentValidator._contains_phrase(result, item)]
-        if missing_keywords:
-            additions.append("Актуальные поисковые фразы: " + ", ".join(missing_keywords[:3]) + ".")
         if care and not SeoContentValidator._contains_any_token(result, care):
             additions.append(f"Уход: {care}.")
         if additions:
@@ -176,8 +224,8 @@ class SeoContentValidator:
             result = re.sub(re.escape(claim), "", result, flags=re.IGNORECASE)
         if len(result) < min_chars:
             filler = (
-                "Описание уточняет материал, посадку и сценарии использования без неподтвержденных обещаний, "
-                "чтобы карточка лучше соответствовала поисковым запросам и ожиданиям покупателя."
+                "Описание раскрывает материал, посадку, сценарии использования и уход простым естественным языком, "
+                "чтобы покупателю было легче понять, чем модель удобна в повседневной носке."
             )
             while len(result) < min_chars:
                 result = SeoContentValidator._normalize(f"{result} {filler}")
