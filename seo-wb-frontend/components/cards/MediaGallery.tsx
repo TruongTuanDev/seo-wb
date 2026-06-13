@@ -1321,8 +1321,8 @@ export function MediaGallery({
               )}
 
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-                <Button variant="brand" onClick={submit}>
+                <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
+                <Button type="button" variant="brand" onClick={submit}>
                   <WandSparkles size={16} />
                   Generate
                 </Button>

@@ -20,6 +20,13 @@ class EffectiveAiRuntimeSettings:
     validation_threshold: int
     validation_failure_behavior: str
     allow_legacy_vton: bool
+    seo_engine_enabled: bool
+    seo_min_score: int
+    description_min_chars: int
+    description_max_chars: int
+    seo_repair_max_attempts: int
+    require_primary_keyword_in_title: bool
+    warn_low_confidence_attributes: bool
 
 
 def get_or_create_admin_ai_settings(db: Session) -> AdminAiSettings:
@@ -45,6 +52,13 @@ def get_effective_ai_runtime_settings(db: Session, settings: Settings) -> Effect
         validation_threshold=max(0, min(100, row.validation_threshold)),
         validation_failure_behavior=row.validation_failure_behavior if row.validation_failure_behavior in {"block", "warn"} else "warn",
         allow_legacy_vton=bool(row.allow_legacy_vton),
+        seo_engine_enabled=bool(row.seo_engine_enabled),
+        seo_min_score=max(0, min(100, row.seo_min_score)),
+        description_min_chars=max(200, row.description_min_chars),
+        description_max_chars=max(max(200, row.description_min_chars), row.description_max_chars),
+        seo_repair_max_attempts=max(0, row.seo_repair_max_attempts),
+        require_primary_keyword_in_title=bool(row.require_primary_keyword_in_title),
+        warn_low_confidence_attributes=bool(row.warn_low_confidence_attributes),
     )
 
 

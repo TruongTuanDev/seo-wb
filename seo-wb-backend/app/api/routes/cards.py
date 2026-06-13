@@ -2,6 +2,7 @@ import json
 import uuid
 from typing import Annotated, Any
 from pathlib import Path
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -17,6 +18,7 @@ from app.models.admin import GeneratedImageJob
 from app.models.card import CardDraft, CardJob
 from app.models.user import User
 from app.schemas.card import (
+    AcceptLowConfidenceAttributesRequest,
     CardGenerateResponse,
     CardJobResponse,
     DraftListResponse,
@@ -34,11 +36,16 @@ from app.schemas.card import (
     ImageGenerationJobResponse,
 )
 from app.services.card_flow import CardFlowService
+from app.services.card_generator import CardGenerator
+from app.services.card_payload_enricher import CardPayloadEnricher
+from app.services.product_copy_policy import build_copy_policy_context, build_seo_title, cleanup_description, cleanup_title, render_description, resolve_product_family
 from app.services.rabbitmq_publisher import publish_sync_job
 from app.services.admin_runtime import get_effective_ai_runtime_settings, list_public_model_templates
 from app.services.billing_foundation import credit_cost_for_job, pending_credit_reservations, queue_name_for_plan
 from app.services.product_image_generator import ProductImageGenerator
 from app.services.redis_client import require_redis
+from app.services.seo_content_validator import SeoContentValidator
+from app.services.seo_keyword_planner import SeoKeywordPlanner
 from app.services.usage_plans import get_usage_plan
 
 
@@ -157,6 +164,13 @@ def _runtime_config(db: Session, settings: Settings) -> dict[str, Any]:
         "validation_threshold": runtime.validation_threshold,
         "validation_failure_behavior": runtime.validation_failure_behavior,
         "allow_legacy_vton": runtime.allow_legacy_vton,
+        "seo_engine_enabled": runtime.seo_engine_enabled,
+        "seo_min_score": runtime.seo_min_score,
+        "description_min_chars": runtime.description_min_chars,
+        "description_max_chars": runtime.description_max_chars,
+        "seo_repair_max_attempts": runtime.seo_repair_max_attempts,
+        "require_primary_keyword_in_title": runtime.require_primary_keyword_in_title,
+        "warn_low_confidence_attributes": runtime.warn_low_confidence_attributes,
     }
 
 
@@ -455,6 +469,10 @@ async def generate_card(
         analysis=ImageAnalysis.model_validate(analysis),
         card_payload=card_payload,
         warnings=analysis.get("warnings", []),
+        seo_keyword_plan=analysis.get("seo_keyword_plan"),
+        seo_score=analysis.get("seo_score"),
+        seo_issues=analysis.get("seo_issues", []),
+        attribute_confidence=analysis.get("attribute_confidence"),
     )
 
 
@@ -1554,6 +1572,292 @@ def _draft_response(draft: CardDraft) -> DraftResponse:
         analysis=draft.analysis,
         card_payload=draft.card_payload,
         wb_response=draft.wb_response,
+        seo_keyword_plan=draft.analysis.get("seo_keyword_plan") if isinstance(draft.analysis, dict) else None,
+        seo_score=draft.analysis.get("seo_score") if isinstance(draft.analysis, dict) else None,
+        seo_issues=draft.analysis.get("seo_issues", []) if isinstance(draft.analysis, dict) else [],
+        attribute_confidence=draft.analysis.get("attribute_confidence") if isinstance(draft.analysis, dict) else None,
         created_at=draft.created_at,
         updated_at=draft.updated_at,
+    )
+
+
+def _draft_payload_copy(draft: CardDraft) -> list[dict[str, Any]]:
+    payload = draft.card_payload if isinstance(draft.card_payload, list) else []
+    return json.loads(json.dumps(payload))
+
+
+def _draft_product_input(draft: CardDraft) -> ProductInput:
+    analysis = _draft_analysis(draft)
+    raw = analysis.get("product_input") if isinstance(analysis, dict) else None
+    if isinstance(raw, dict):
+        try:
+            return ProductInput.model_validate(raw)
+        except Exception:
+            return ProductInput()
+    return ProductInput()
+
+
+def _draft_image_analysis_model(draft: CardDraft) -> ImageAnalysis:
+    analysis = _draft_analysis(draft)
+    return ImageAnalysis.model_validate(analysis)
+
+
+def _draft_subject_context(draft: CardDraft, analysis_model: ImageAnalysis, product_input: ProductInput) -> dict[str, Any]:
+    payload = draft.card_payload if isinstance(draft.card_payload, list) and draft.card_payload else []
+    subject_id = draft.subject_id or (payload[0].get("subjectID") if payload and isinstance(payload[0], dict) else None) or 0
+    subject_name = product_input.category or analysis_model.category or "Товар"
+    if payload and isinstance(payload[0], dict):
+        first_title = (((payload[0].get("variants") or [None])[0]) or {}).get("title") if payload[0].get("variants") else None
+        if first_title and len(str(first_title).split()) <= 8:
+            subject_name = str(first_title).split()[0]
+    return {"subjectID": int(subject_id), "subjectName": str(subject_name)}
+
+
+async def _draft_charcs(
+    db: Session,
+    settings: Settings,
+    user: User,
+    draft: CardDraft,
+    subject_id: int,
+) -> list[dict[str, Any]]:
+    store = get_owned_store(db, user, draft.store_id)
+    flow = CardFlowService(settings, db, user, store)
+    return await flow._wb.get_subject_charcs(subject_id, locale="ru")
+
+
+async def _recompute_draft_seo(
+    draft: CardDraft,
+    *,
+    db: Session,
+    settings: Settings,
+    user: User,
+    rewrite_copy: bool,
+    improve_only: bool,
+) -> DraftResponse:
+    runtime = get_effective_ai_runtime_settings(db, settings)
+    if not runtime.seo_engine_enabled:
+        raise AppError("seo_engine_disabled", "SEO engine is disabled by admin settings.", 403)
+
+    product_input = _draft_product_input(draft)
+    analysis_model = _draft_image_analysis_model(draft)
+    subject = _draft_subject_context(draft, analysis_model, product_input)
+    charcs = await _draft_charcs(db, settings, user, draft, int(subject["subjectID"]))
+    analysis = _draft_analysis(draft)
+    payload = _draft_payload_copy(draft)
+    attribute_confidence = analysis.get("attribute_confidence") if isinstance(analysis.get("attribute_confidence"), dict) else None
+    if not attribute_confidence:
+        attribute_confidence = CardPayloadEnricher(charcs).build_attribute_confidence(
+            subject_id=int(subject["subjectID"]),
+            user_input=product_input,
+            analysis=analysis_model,
+        )
+    seo_keyword_plan = analysis.get("seo_keyword_plan") if isinstance(analysis.get("seo_keyword_plan"), dict) else None
+    if not seo_keyword_plan:
+        seo_keyword_plan = SeoKeywordPlanner.build_plan(
+            category=product_input.category or analysis_model.category,
+            subject_name=subject.get("subjectName"),
+            brand=product_input.brand,
+            gender=product_input.gender or analysis_model.gender,
+            analysis=analysis_model,
+            user_input=product_input,
+            confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+            wb_characteristics=charcs,
+            product_family_policy=build_copy_policy_context(subject, analysis_model, product_input),
+        )
+
+    current_score = analysis.get("seo_score") if isinstance(analysis.get("seo_score"), dict) else {}
+    should_rewrite = rewrite_copy or not improve_only or int(current_score.get("seo_score") or 0) < runtime.seo_min_score
+
+    if should_rewrite:
+        for group in payload:
+            for variant in group.get("variants") or []:
+                title_payload = build_seo_title(
+                    subject.get("subjectName"),
+                    analysis_model.gender or product_input.gender,
+                    CardGenerator._title_attributes(product_input, analysis_model, subject, seo_keyword_plan, attribute_confidence),
+                    seo_keyword_plan,
+                    brand=(product_input.brand or "").strip() or None,
+                )
+                variant["title"] = cleanup_title(
+                    str(title_payload.get("title") or variant.get("title") or ""),
+                    str(subject.get("subjectName") or "Товар"),
+                    analysis_model,
+                    product_input,
+                )
+                policy = resolve_product_family(subject, analysis_model, product_input)
+                regenerated = render_description(policy, title=variant["title"], analysis=analysis_model, user_input=product_input)
+                variant["description"] = cleanup_description(
+                    regenerated if rewrite_copy or not str(variant.get("description") or "").strip() else str(variant.get("description") or ""),
+                    title=variant["title"],
+                    subject=subject,
+                    analysis=analysis_model,
+                    user_input=product_input,
+                )
+
+    issues: list[str] = []
+    suggestions: list[str] = []
+    scorecards: list[dict[str, Any]] = []
+    for group in payload:
+        for variant in group.get("variants") or []:
+            validator_result = SeoContentValidator.validate(
+                title=str(variant.get("title") or ""),
+                description=str(variant.get("description") or ""),
+                seo_keyword_plan=seo_keyword_plan,
+                confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+                inferred_attributes=attribute_confidence.get("inferred_attributes"),
+                min_chars=runtime.description_min_chars,
+                max_chars=runtime.description_max_chars,
+                auto_fix=True,
+            )
+            variant["description"] = validator_result.get("fixed_description") or variant.get("description")
+            issues.extend(validator_result.get("issues", []))
+            suggestions.extend(validator_result.get("suggestions", []))
+            scorecards.append(
+                SeoContentValidator.build_scorecard(
+                    title=str(variant.get("title") or ""),
+                    description=str(variant.get("description") or ""),
+                    seo_keyword_plan=seo_keyword_plan,
+                    validator_result=validator_result,
+                    confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+                    inferred_attributes=attribute_confidence.get("inferred_attributes"),
+                )
+            )
+    aggregate = {
+        "seo_score": int(round(sum(item.get("seo_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "title_score": int(round(sum(item.get("title_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "description_score": int(round(sum(item.get("description_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "attributes_score": int(round(sum(item.get("attributes_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "keyword_coverage_score": int(round(sum(item.get("keyword_coverage_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "issues": list(dict.fromkeys(issues))[:10],
+        "suggestions": list(dict.fromkeys(suggestions))[:10],
+        "status": "poor",
+        "variants": scorecards,
+    }
+    score = aggregate["seo_score"]
+    aggregate["status"] = "excellent" if score >= 85 else "good" if score >= 70 else "needs_review" if score >= 50 else "poor"
+
+    next_analysis = dict(analysis)
+    next_analysis["product_input"] = product_input.model_dump(mode="json", exclude_none=True)
+    next_analysis["attribute_confidence"] = attribute_confidence
+    next_analysis["seo_keyword_plan"] = seo_keyword_plan
+    next_analysis["seo_score"] = aggregate
+    next_analysis["seo_issues"] = aggregate["issues"]
+    draft.analysis = next_analysis
+    draft.card_payload = _preserve_existing_media(draft.card_payload, payload)
+    db.commit()
+    db.refresh(draft)
+    return _draft_response(draft)
+
+
+@router.post("/drafts/{draft_id}/seo/improve", response_model=DraftResponse)
+async def improve_draft_seo(
+    draft_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> DraftResponse:
+    draft = _get_owned_draft(db, user, draft_id)
+    return await _recompute_draft_seo(
+        draft,
+        db=db,
+        settings=settings,
+        user=user,
+        rewrite_copy=False,
+        improve_only=True,
+    )
+
+
+@router.post("/drafts/{draft_id}/seo/regenerate-copy", response_model=DraftResponse)
+async def regenerate_draft_seo_copy(
+    draft_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> DraftResponse:
+    draft = _get_owned_draft(db, user, draft_id)
+    return await _recompute_draft_seo(
+        draft,
+        db=db,
+        settings=settings,
+        user=user,
+        rewrite_copy=True,
+        improve_only=False,
+    )
+
+
+@router.post("/drafts/{draft_id}/seo/accept-low-confidence-attributes", response_model=DraftResponse)
+async def accept_low_confidence_attributes(
+    draft_id: int,
+    payload: AcceptLowConfidenceAttributesRequest,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> DraftResponse:
+    draft = _get_owned_draft(db, user, draft_id)
+    runtime = get_effective_ai_runtime_settings(db, settings)
+    if not runtime.seo_engine_enabled:
+        raise AppError("seo_engine_disabled", "SEO engine is disabled by admin settings.", 403)
+
+    analysis = dict(_draft_analysis(draft))
+    attribute_confidence = analysis.get("attribute_confidence")
+    if not isinstance(attribute_confidence, dict):
+        raise AppError("attribute_confidence_missing", "Draft does not have attribute confidence data yet.", 409)
+    confirmed_attributes = dict(attribute_confidence.get("confirmed_attributes") or {})
+    inferred_attributes = dict(attribute_confidence.get("inferred_attributes") or {})
+    low_confidence_attributes = list(attribute_confidence.get("low_confidence_attributes") or [])
+    selected_keys = [str(key).strip() for key in payload.attribute_keys if str(key).strip()]
+
+    moved_keys: list[str] = []
+    for key in selected_keys:
+        if key in low_confidence_attributes and key in inferred_attributes:
+            confirmed_attributes[key] = inferred_attributes[key]
+            inferred_attributes.pop(key, None)
+            moved_keys.append(key)
+    attribute_confidence["confirmed_attributes"] = confirmed_attributes
+    attribute_confidence["inferred_attributes"] = inferred_attributes
+    attribute_confidence["low_confidence_attributes"] = [key for key in low_confidence_attributes if key not in moved_keys]
+
+    product_input = _draft_product_input(draft)
+    analysis_model = _draft_image_analysis_model(draft)
+    subject = _draft_subject_context(draft, analysis_model, product_input)
+    charcs = await _draft_charcs(db, settings, user, draft, int(subject["subjectID"]))
+    enricher = CardPayloadEnricher(charcs)
+    next_payload = _draft_payload_copy(draft)
+    alias_map = {
+        "composition": "composition",
+        "material": "composition",
+        "color": "color",
+        "gender": "gender",
+        "season": "season",
+        "fit": "fit",
+        "pattern": "pattern",
+        "purpose": "purpose",
+        "lining": "lining",
+        "texture": "texture",
+    }
+    for group in next_payload:
+        for variant in group.get("variants") or []:
+            for key in moved_keys:
+                alias = alias_map.get(key, key)
+                value = confirmed_attributes.get(alias) or confirmed_attributes.get(key)
+                if value:
+                    enricher._upsert_by_alias(variant, alias, value, overwrite=True)
+            enricher._conform_characteristics(variant)
+
+    accepted_history = list(analysis.get("accepted_low_confidence_attributes") or [])
+    accepted_history.extend([key for key in moved_keys if key not in accepted_history])
+    analysis["accepted_low_confidence_attributes"] = accepted_history
+    analysis["accepted_at"] = datetime.now(timezone.utc).isoformat()
+    analysis["attribute_confidence"] = attribute_confidence
+    draft.analysis = analysis
+    draft.card_payload = _preserve_existing_media(draft.card_payload, next_payload)
+    db.commit()
+    db.refresh(draft)
+    return await _recompute_draft_seo(
+        draft,
+        db=db,
+        settings=settings,
+        user=user,
+        rewrite_copy=False,
+        improve_only=False,
     )

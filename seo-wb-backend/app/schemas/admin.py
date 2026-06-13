@@ -166,6 +166,13 @@ class AdminAiSettingsResponse(BaseModel):
     validation_threshold: int
     validation_failure_behavior: str
     allow_legacy_vton: bool
+    seo_engine_enabled: bool
+    seo_min_score: int
+    description_min_chars: int
+    description_max_chars: int
+    seo_repair_max_attempts: int
+    require_primary_keyword_in_title: bool
+    warn_low_confidence_attributes: bool
     openai_configured: bool
     fal_configured: bool
     gemini_configured: bool
@@ -181,6 +188,13 @@ class AdminAiSettingsUpdateRequest(BaseModel):
     validation_threshold: int = Field(ge=0, le=100)
     validation_failure_behavior: str = Field(default="warn", pattern="^(block|warn)$")
     allow_legacy_vton: bool
+    seo_engine_enabled: bool = True
+    seo_min_score: int = Field(default=70, ge=0, le=100)
+    description_min_chars: int = Field(default=600, ge=200, le=2000)
+    description_max_chars: int = Field(default=900, ge=200, le=3000)
+    seo_repair_max_attempts: int = Field(default=1, ge=0, le=3)
+    require_primary_keyword_in_title: bool = True
+    warn_low_confidence_attributes: bool = True
 
 
 class UsageRecordResponse(BaseModel):

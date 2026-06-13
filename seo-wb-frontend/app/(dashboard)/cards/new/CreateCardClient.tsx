@@ -79,6 +79,27 @@ interface GenerateResponse {
     recommendations?: RecommendationPayload | null;
   };
   card_payload?: GeneratedGroup[];
+  seo_keyword_plan?: {
+    primary_keyword?: string;
+    secondary_keywords?: string[];
+  } | null;
+  seo_score?: {
+    seo_score?: number;
+    title_score?: number;
+    description_score?: number;
+    attributes_score?: number;
+    keyword_coverage_score?: number;
+    issues?: string[];
+    suggestions?: string[];
+    status?: string;
+  } | null;
+  seo_issues?: string[];
+  attribute_confidence?: {
+    confirmed_attributes?: Record<string, unknown>;
+    inferred_attributes?: Record<string, unknown>;
+    missing_attributes?: string[];
+    low_confidence_attributes?: string[];
+  } | null;
 }
 
 interface DraftResponse {
@@ -88,6 +109,10 @@ interface DraftResponse {
   analysis?: {
     recommendations?: RecommendationPayload | null;
   } | null;
+  seo_keyword_plan?: GenerateResponse["seo_keyword_plan"];
+  seo_score?: GenerateResponse["seo_score"];
+  seo_issues?: string[];
+  attribute_confidence?: GenerateResponse["attribute_confidence"];
 }
 
 interface ImageGenerationJob {
@@ -323,6 +348,10 @@ export function CreateCardClient() {
   const [imageGenerationJobs, setImageGenerationJobs] = useState<Record<string, ImageGenerationJob>>({});
   const completedImageJobsRef = React.useRef<Set<string>>(new Set());
   const [recommendations, setRecommendations] = useState<RecommendationPayload | null>(null);
+  const [, setSeoKeywordPlan] = useState<GenerateResponse["seo_keyword_plan"] | null>(null);
+  const [seoScore, setSeoScore] = useState<GenerateResponse["seo_score"] | null>(null);
+  const [, setSeoIssues] = useState<string[]>([]);
+  const [, setAttributeConfidence] = useState<GenerateResponse["attribute_confidence"] | null>(null);
 
   useEffect(() => {
     return () => {
@@ -339,6 +368,77 @@ export function CreateCardClient() {
   const closeZoomImage = () => {
     setZoomImageUrl(null);
   };
+
+  const applyDraftResponse = async (draft: DraftResponse) => {
+    const group = draft.card_payload?.[0];
+    const resolvedSubjectId = group?.subjectID || draft.subject_id || 0;
+    let loadedCharcSchema: WbCharacteristicSchema[] = [];
+    if (resolvedSubjectId) {
+      const charcSchemaResponse = await api.get(`/wb/subjects/${resolvedSubjectId}/charcs?store_id=${storeId}`);
+      loadedCharcSchema = charcSchemaResponse?.data || charcSchemaResponse || [];
+      setCharcSchema(loadedCharcSchema);
+    }
+    const rawVariants = group?.variants || [];
+    const loadedVariants = await Promise.all(rawVariants.map(async (variant: GeneratedVariant, index: number) => {
+      const mappedCharcs = (variant.characteristics || []).map((item: GeneratedCharacteristic) => ({
+        id: Number(item.id || 0),
+        name: item.name || charcNameById(loadedCharcSchema, Number(item.id || 0)) || `Characteristic ${item.id}`,
+        value: Array.isArray(item.value) ? item.value.join("; ") : String(item.value || ""),
+      }));
+      const variantColor = findCharacteristicValue(mappedCharcs, ["Ð¦Ð²ÐµÑ‚", "color"]);
+      return {
+        id: crypto.randomUUID(),
+        title: variant.title || "",
+        description: variant.description || "",
+        vendorCode: variant.vendorCode || "",
+        color: variantColor,
+        images: await loadDraftImages(variant, index),
+        characteristics: mappedCharcs,
+        sizes: (variant.sizes || []).map((size: GeneratedSize) => ({
+          techSize: String(size.techSize || "").trim(),
+          wbSize: String(size.wbSize || "").trim(),
+          sku: size.skus?.[0] || size.sku || "",
+        })),
+      };
+    }));
+
+    setDraftId(draft.id);
+    setRecommendations(draft.analysis?.recommendations || null);
+    setSeoKeywordPlan(draft.seo_keyword_plan || null);
+    setSeoScore(draft.seo_score || null);
+    setSeoIssues(draft.seo_issues || []);
+    setAttributeConfidence(draft.attribute_confidence || null);
+    setSubjectId(resolvedSubjectId);
+    setVariants(loadedVariants);
+    const selectedIndex = Number.isFinite(variantIndexParam) ? variantIndexParam : 0;
+    const selectedVariant = loadedVariants[selectedIndex] || loadedVariants[0];
+    const selectedPayloadVariant = rawVariants[selectedIndex] || rawVariants[0];
+    if (selectedVariant) {
+      setActiveVariantId(selectedVariant.id);
+      setGeneratedTitle(selectedVariant.title);
+      setGeneratedDesc(selectedVariant.description);
+      setVendorCode(selectedVariant.vendorCode);
+      setCharcs(selectedVariant.characteristics);
+      setSizes(selectedVariant.sizes);
+      setImages(selectedVariant.images);
+      setColor(selectedVariant.color);
+      const loadedGender = findCharacteristicValue(selectedVariant.characteristics, ["ÐŸÐ¾Ð»", "gender"]);
+      if (loadedGender) setGender(loadedGender);
+    }
+    if (selectedPayloadVariant?.brand) {
+      setBrand(selectedPayloadVariant.brand);
+    }
+    if (selectedPayloadVariant?.dimensions) {
+      setDimensions({
+        length: selectedPayloadVariant.dimensions.length || 0,
+        width: selectedPayloadVariant.dimensions.width || 0,
+        height: selectedPayloadVariant.dimensions.height || 0,
+        weightBrutto: selectedPayloadVariant.dimensions.weightBrutto || 0,
+      });
+    }
+    setCurrentStep(2);
+  };
+  void applyDraftResponse;
 
   useEffect(() => {
     if (!draftIdParam) return;
@@ -380,6 +480,10 @@ export function CreateCardClient() {
 
         setDraftId(draft.id);
         setRecommendations(draft.analysis?.recommendations || null);
+        setSeoKeywordPlan(draft.seo_keyword_plan || null);
+        setSeoScore(draft.seo_score || null);
+        setSeoIssues(draft.seo_issues || []);
+        setAttributeConfidence(draft.attribute_confidence || null);
         setSubjectId(resolvedSubjectId);
         setVariants(loadedVariants);
         const selectedIndex = Number.isFinite(variantIndexParam) ? variantIndexParam : 0;
@@ -725,7 +829,7 @@ export function CreateCardClient() {
         sizes: sizes.map(s => s.techSize || s.wbSize).filter(Boolean),
         dimensions: {},
         note,
-        attributes: {}
+        attributes: {},
       };
       
       formData.append("product_input_json", JSON.stringify(payload));
@@ -735,6 +839,10 @@ export function CreateCardClient() {
       
       setDraftId(response.draft_id || 1);
       setRecommendations(response.analysis?.recommendations || null);
+      setSeoKeywordPlan(response.seo_keyword_plan || null);
+      setSeoScore(response.seo_score || null);
+      setSeoIssues(response.seo_issues || []);
+      setAttributeConfidence(response.attribute_confidence || null);
       setAiAnalysis(JSON.stringify(response.analysis || {}, null, 2));
       const generatedVariants = response.card_payload?.[0]?.variants || [];
       const generatedVariant = generatedVariants[0];
@@ -810,7 +918,7 @@ export function CreateCardClient() {
       setJobId(null);
 
       setCurrentStep(2); // Move to Edit
-      success("Generation Complete");
+      success("AI đã tối ưu nội dung tự động");
     } catch (err: unknown) {
       error("Generation failed", getErrorMessage(err));
       setCurrentStep(0); // Back to inputs
@@ -1078,7 +1186,7 @@ export function CreateCardClient() {
               />
             </div>
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
-              Front image is used as the main garment reference. Back image is optional and enables back-view generations.
+              Upload front and back product photos, then the system will analyze the garment and auto-generate attributes, title, description, and SEO suggestions for you.
             </div>
           </div>
         </aside>
@@ -1106,13 +1214,16 @@ export function CreateCardClient() {
               )}
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-700">User Setup Prompts / Notes (Optional)</label>
+                <label className="text-sm font-medium text-zinc-700">Optional Notes</label>
                 <textarea
                   value={note}
                   onChange={e => setNote(e.target.value)}
-                  placeholder="e.g. женские брюки, черный цвет, хлопок, высокая посадка"
+                  placeholder="Leave empty for the fastest flow, or add a short note only if you want to steer the AI."
                   className="h-28 w-full rounded-md border border-zinc-300 bg-white p-3 text-sm text-zinc-900 shadow-soft-sm transition-colors duration-150 placeholder:text-zinc-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-indigo-100"
                 />
+                <p className="text-xs text-zinc-500">
+                  This is optional. The default flow is image-first: upload product photos and let AI infer most details automatically.
+                </p>
               </div>
             </div>
           </div>
@@ -1143,6 +1254,11 @@ export function CreateCardClient() {
 
   const renderEdit = () => (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+       {seoScore && (
+         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-soft-sm">
+           AI đã tối ưu nội dung tự động{seoScore?.seo_score ? ` (SEO ${seoScore.seo_score})` : ""}.
+         </div>
+       )}
        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[260px_minmax(0,1fr)_320px]">
           <VariantSidebar
             variants={variants}

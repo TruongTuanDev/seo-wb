@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.schemas.card import ImageAnalysis, ProductInput
+from app.services.product_copy_policy import suggest_characteristics
 
 
 CHARC_ALIASES = {
@@ -15,6 +16,8 @@ CHARC_ALIASES = {
     "features": ["Особенности модели"],
     "purpose": ["Назначение"],
     "contents": ["Комплектация"],
+    "underwear_features": ["Особенности белья"],
+    "age_limits": ["Возрастные ограничения"],
     "insulation": ["Утеплитель"],
     "care": ["Уход за вещами"],
     "pattern": ["Рисунок"],
@@ -33,6 +36,16 @@ STRICT_SKIP_NAMES = {
     "Дата регистрации сертификата/декларации",
     "Дата окончания действия сертификата/декларации",
     "Любимые герои",
+}
+
+HIGH_RISK_ALIASES = {
+    "composition",
+    "color",
+    "gender",
+    "season",
+    "pattern",
+    "texture",
+    "lining",
 }
 
 
@@ -60,6 +73,48 @@ class CardPayloadEnricher:
             self.enrich_variant(variant, subject_id=subject_id, tnved=tnved, user_input=user_input, analysis=analysis)
         return payload
 
+    def build_attribute_confidence(
+        self,
+        *,
+        subject_id: int,
+        user_input: ProductInput | None,
+        analysis: ImageAnalysis | None,
+    ) -> dict[str, Any]:
+        values = self._infer_values(subject_id=subject_id, user_input=user_input, analysis=analysis)
+        confirmed_attributes: dict[str, Any] = {}
+        inferred_attributes: dict[str, Any] = {}
+        missing_attributes: list[str] = []
+        low_confidence_attributes: list[str] = []
+
+        user_attrs = dict(user_input.attributes or {}) if user_input else {}
+        seo_inputs = user_input.seo_inputs if user_input else None
+        for alias, value in values.items():
+            if not value:
+                if alias in {"composition", "color", "gender", "season", "purpose"}:
+                    missing_attributes.append(alias)
+                continue
+            is_confirmed = self._is_confirmed(
+                alias,
+                value,
+                user_input=user_input,
+                analysis=analysis,
+                user_attrs=user_attrs,
+                seo_inputs=seo_inputs,
+            )
+            if is_confirmed:
+                confirmed_attributes[alias] = value
+            else:
+                inferred_attributes[alias] = value
+                if alias in HIGH_RISK_ALIASES:
+                    low_confidence_attributes.append(alias)
+
+        return {
+            "confirmed_attributes": confirmed_attributes,
+            "inferred_attributes": inferred_attributes,
+            "missing_attributes": missing_attributes,
+            "low_confidence_attributes": low_confidence_attributes,
+        }
+
     def enrich_variant(
         self,
         variant: dict[str, Any],
@@ -71,17 +126,24 @@ class CardPayloadEnricher:
     ) -> None:
         self._drop_unknown_characteristics(variant)
         if tnved and tnved.get("tnved"):
-            # New WB card flow expects TN VED as a direct variant field. Keep the
-            # characteristic too when the subject schema exposes it.
             variant["tnved"] = str(tnved["tnved"])
             self._upsert_by_alias(variant, "tnved", [str(tnved["tnved"])], overwrite=True)
             if tnved.get("isKiz") is True:
                 variant["kizMarked"] = True
 
         values = self._infer_values(subject_id=subject_id, user_input=user_input, analysis=analysis)
+        confidence = self.build_attribute_confidence(subject_id=subject_id, user_input=user_input, analysis=analysis)
+        low_confidence = set(confidence.get("low_confidence_attributes", []))
         for alias, value in values.items():
             if value:
-                self._upsert_by_alias(variant, alias, value, overwrite=alias in {"composition", "gender", "season", "fit"})
+                if alias in low_confidence:
+                    continue
+                self._upsert_by_alias(
+                    variant,
+                    alias,
+                    value,
+                    overwrite=alias in {"composition", "gender", "season", "fit", "purpose", "underwear_features", "age_limits"},
+                )
         self._conform_characteristics(variant)
 
     def _infer_values(
@@ -96,6 +158,8 @@ class CardPayloadEnricher:
             attrs.update(user_input.attributes or {})
         if analysis:
             attrs.update(analysis.attributes or {})
+        for key, value in suggest_characteristics({"subjectID": subject_id}, analysis, user_input).items():
+            attrs.setdefault(key, value)
 
         features = [str(item) for item in (analysis.features if analysis else []) if item]
         all_text = " ".join([*features, *[f"{key} {value}" for key, value in attrs.items()]]).casefold()
@@ -110,8 +174,10 @@ class CardPayloadEnricher:
             "closure": self._first(attrs, ["Вид застежки"]) or self._closure(all_text),
             "pockets": self._first(attrs, ["Тип карманов"]) or self._pockets(all_text),
             "features": self._first(attrs, ["Особенности модели"]) or self._features(features),
-            "purpose": self._first(attrs, ["Назначение"]) or "повседневная; офис; учеба",
+            "purpose": self._first(attrs, ["Назначение", "purpose"]) or self._default_purpose(all_text),
             "contents": self._first(attrs, ["Комплектация"]) or self._contents(subject_id),
+            "underwear_features": self._first(attrs, ["Особенности белья", "underwear_features"]),
+            "age_limits": self._first(attrs, ["Возрастные ограничения", "age_limits"]),
             "insulation": self._first(attrs, ["Утеплитель"]) or "без утеплителя",
             "care": self._first(attrs, ["Уход за вещами"]) or self._care_value(all_text),
             "pattern": self._first(attrs, ["Рисунок"]) or self._pattern_value(all_text),
@@ -319,6 +385,16 @@ class CardPayloadEnricher:
         return "; ".join(cleaned[:5]) if cleaned else None
 
     @staticmethod
+    def _default_purpose(text: str) -> str:
+        if any(token in text for token in ["бель", "трус", "боксер"]):
+            return "повседневная; в школу; для спорта"
+        if any(token in text for token in ["сумк", "рюкзак", "кошел"]):
+            return "повседневная; в школу; в поездки"
+        if any(token in text for token in ["пижам", "сорочка", "халат"]):
+            return "для сна; домашняя; для отдыха"
+        return "повседневная; для прогулок; учеба"
+
+    @staticmethod
     def _care_value(text: str) -> str:
         if "шерст" in text:
             return "деликатная стирка; не отбеливать; сушить в расправленном виде"
@@ -384,3 +460,30 @@ class CardPayloadEnricher:
         if subject_id == 11:
             return "Брюки - 1 шт."
         return "Товар - 1 шт."
+
+    @staticmethod
+    def _is_confirmed(
+        alias: str,
+        value: Any,
+        *,
+        user_input: ProductInput | None,
+        analysis: ImageAnalysis | None,
+        user_attrs: dict[str, Any],
+        seo_inputs: Any,
+    ) -> bool:
+        alias_to_sources = {
+            "composition": [user_attrs.get("Состав"), getattr(seo_inputs, "material", None), analysis.material if analysis else None],
+            "color": [user_attrs.get("Цвет"), getattr(seo_inputs, "color", None), user_input.color if user_input else None],
+            "gender": [user_attrs.get("Пол"), getattr(seo_inputs, "target_audience", None), user_input.gender if user_input else None],
+            "season": [user_attrs.get("Сезон"), getattr(seo_inputs, "season", None)],
+            "fit": [user_attrs.get("Тип посадки"), getattr(seo_inputs, "fit", None)],
+            "purpose": [user_attrs.get("Назначение"), getattr(seo_inputs, "purpose", None), user_input.note if user_input else None],
+            "pattern": [user_attrs.get("Рисунок"), getattr(seo_inputs, "pattern", None)],
+        }
+        for source in alias_to_sources.get(alias, []):
+            if source is None:
+                continue
+            text = str(source).strip().casefold()
+            if text and str(value).strip().casefold() in text:
+                return True
+        return alias not in HIGH_RISK_ALIASES

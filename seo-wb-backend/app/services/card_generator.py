@@ -7,6 +7,14 @@ from openai import OpenAI
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.schemas.card import CardUploadGroup, Dimensions, ImageAnalysis, ProductInput, SizeItem, Variant
+from app.services.product_copy_policy import (
+    build_seo_title,
+    build_copy_policy_context,
+    cleanup_description,
+    cleanup_title,
+    render_description,
+    resolve_product_family,
+)
 from app.services.product_intent_parser import ProductIntent, ProductIntentParser
 
 
@@ -16,11 +24,11 @@ SYSTEM_PROMPT = (
     "Формат: массив объектов {subjectID, variants}. Каждый variant содержит vendorCode, title, description, brand, dimensions, characteristics, sizes. "
     "Пиши title и description на русском языке. "
     "ПРАВИЛА ДЛЯ СОЗДАНИЯ ОПИСАНИЯ (description): "
-    "- Сделай описание связным, живым и естественным текстом (без сухого перечисления характеристик типа 'Материал:', 'Посадка:', которые уже есть в свойствах). "
+    "- Сделай описание связным, живым и естественным текстом без сухого перечисления характеристик. "
     "- Длина описания должна быть строго в пределах от 600 до 900 символов. "
-    "- Сфокусируйся на главных и второстепенных ключевых словах (SEO), соответствующих категории товара. "
-    "- Опиши преимущества товара: комфорт, удобство, свобода движений (не сковывает движения), легкая сочетаемость с базовым гардеробом. "
-    "- Обязательно укажи сценарии использования (в школу, на учебу, для прогулок, офис, работа, повседневная носка) и целевую аудиторию (женщины/мужчины, подростки, школьники, студенты). "
+    "- Используй family_copy_policy из payload как главный ориентир для tone, focus_points, use_cases и forbidden_phrases. "
+    "- Не применяй универсальные fashion-формулировки ко всем категориям: белье, домашняя одежда, аксессуары, верхняя одежда и базовая одежда требуют разного контекста. "
+    "- Пиши только релевантные сценарии использования и выгоды для конкретной категории товара. "
     "ПРАВИЛА ДЛЯ ХАРАКТЕРИСТИК (characteristics): "
     "- Characteristics заполняй только из provided fillable_charcs: используй точный id, не придумывай id. "
     "- Заполняй required и popular характеристики, если значение можно уверенно вывести из image_analysis или user_input. "
@@ -47,13 +55,32 @@ class CardGenerator:
         subject: dict[str, Any],
         charcs: list[dict[str, Any]],
         garment_json: dict[str, Any] | None = None,
+        seo_keyword_plan: dict[str, Any] | None = None,
+        attribute_confidence: dict[str, Any] | None = None,
     ) -> list[CardUploadGroup]:
         fallback_intent = ProductIntentParser.parse(user_input.note)
         gemini_intent = ProductIntentParser.from_analysis(analysis)
         intent = gemini_intent.merge_missing(fallback_intent)
         if self._client and self._model:
-            return self._generate_with_openai(user_input, analysis, subject, charcs, intent, garment_json or {})
-        return self._generate_fallback(user_input, analysis, subject, charcs, intent)
+            return self._generate_with_openai(
+                user_input,
+                analysis,
+                subject,
+                charcs,
+                intent,
+                garment_json or {},
+                seo_keyword_plan or {},
+                attribute_confidence or {},
+            )
+        return self._generate_fallback(
+            user_input,
+            analysis,
+            subject,
+            charcs,
+            intent,
+            seo_keyword_plan or {},
+            attribute_confidence or {},
+        )
 
     def _generate_with_openai(
         self,
@@ -63,13 +90,23 @@ class CardGenerator:
         charcs: list[dict[str, Any]],
         intent: ProductIntent,
         garment_json: dict[str, Any],
+        seo_keyword_plan: dict[str, Any],
+        attribute_confidence: dict[str, Any],
     ) -> list[CardUploadGroup]:
+        confirmed_attributes = (attribute_confidence or {}).get("confirmed_attributes") or {}
+        inferred_attributes = (attribute_confidence or {}).get("inferred_attributes") or {}
         user_payload = {
             "task": "generate_wildberries_product_card",
             "user_input": user_input.model_dump(),
             "extracted_user_intent": self._intent_payload(intent),
             "image_analysis": analysis.model_dump(),
             "garment_analysis": garment_json,
+            "seo_keyword_plan": seo_keyword_plan,
+            "title_formula": "[Product type] + [target audience/gender] + [main attribute] + [material/color/fit] + [quantity if set]",
+            "confirmed_attributes": confirmed_attributes,
+            "inferred_attributes": inferred_attributes,
+            "attribute_confidence": attribute_confidence,
+            "family_copy_policy": build_copy_policy_context(subject, analysis, user_input),
             "category_context": {
                 "subjectID": subject["subjectID"],
                 "subjectName": subject.get("subjectName"),
@@ -90,10 +127,10 @@ class CardGenerator:
                 temperature=0.2,
             )
             raw = json.loads(response.choices[0].message.content or "[]")
-            raw = self._enrich_openai_output(raw, user_input, intent, charcs)
+            raw = self._enrich_openai_output(raw, user_input, analysis, subject, intent, charcs, seo_keyword_plan, attribute_confidence)
             return [CardUploadGroup.model_validate(item) for item in raw]
         except Exception:
-            return self._generate_fallback(user_input, analysis, subject, charcs, intent)
+            return self._generate_fallback(user_input, analysis, subject, charcs, intent, seo_keyword_plan, attribute_confidence)
 
     @staticmethod
     def _intent_payload(intent: ProductIntent) -> dict[str, Any]:
@@ -135,11 +172,16 @@ class CardGenerator:
         self,
         raw: Any,
         user_input: ProductInput,
+        analysis: ImageAnalysis,
+        subject: dict[str, Any],
         intent: ProductIntent,
         charcs: list[dict[str, Any]],
+        seo_keyword_plan: dict[str, Any],
+        attribute_confidence: dict[str, Any],
     ) -> Any:
         if not isinstance(raw, list):
             return raw
+        default_category = subject.get("subjectName") or analysis.category or user_input.category or "Товар"
         for group in raw:
             if not isinstance(group, dict):
                 continue
@@ -151,6 +193,21 @@ class CardGenerator:
                 variant.setdefault("dimensions", self._dimensions(user_input, intent))
                 if not variant.get("sizes"):
                     variant["sizes"] = [size.model_dump(mode="json", exclude_none=True) for size in self._sizes(user_input, intent)]
+                title_payload = build_seo_title(
+                    default_category,
+                    analysis.gender or user_input.gender,
+                    self._title_attributes(user_input, analysis, subject, seo_keyword_plan, attribute_confidence),
+                    seo_keyword_plan,
+                    brand=self._brand(user_input),
+                )
+                variant["title"] = cleanup_title(str(title_payload.get("title") or variant.get("title") or ""), default_category, analysis, user_input)
+                variant["description"] = cleanup_description(
+                    str(variant.get("description") or ""),
+                    title=variant["title"],
+                    subject=subject,
+                    analysis=analysis,
+                    user_input=user_input,
+                )
         self._apply_intent_to_raw(raw, user_input, intent, charcs)
         return raw
 
@@ -161,14 +218,16 @@ class CardGenerator:
         subject: dict[str, Any],
         charcs: list[dict[str, Any]],
         intent: ProductIntent,
+        seo_keyword_plan: dict[str, Any],
+        attribute_confidence: dict[str, Any],
     ) -> list[CardUploadGroup]:
         subject_id = int(subject["subjectID"])
         default_category = subject.get("subjectName") or "Товар"
-        title = self._title(user_input, analysis, default_category)
+        title = self._title(user_input, analysis, subject, default_category, seo_keyword_plan, attribute_confidence)
         variant = Variant(
             vendorCode=self._vendor_base(user_input, intent),
             title=title,
-            description=self._description(analysis, title),
+            description=self._description(analysis, user_input, subject, title),
             brand=self._brand(user_input),
             dimensions=Dimensions.model_validate(self._dimensions(user_input, intent)),
             characteristics=self._characteristics(user_input, analysis, charcs),
@@ -183,44 +242,54 @@ class CardGenerator:
         return (user_input.brand or "").strip() or "Нет бренда"
 
     @staticmethod
-    def _title(user_input: ProductInput, analysis: ImageAnalysis, default_category: str) -> str:
-        pieces = [analysis.product_name or user_input.category or default_category, analysis.fit_type]
-        title = " ".join(str(piece).strip() for piece in pieces if piece).strip()[:60].strip()
-        return title if len(title) >= 10 else f"{default_category} базовая модель"[:60]
+    def _title(
+        user_input: ProductInput,
+        analysis: ImageAnalysis,
+        subject: dict[str, Any],
+        default_category: str,
+        seo_keyword_plan: dict[str, Any],
+        attribute_confidence: dict[str, Any],
+    ) -> str:
+        title_payload = build_seo_title(
+            default_category,
+            analysis.gender or user_input.gender,
+            CardGenerator._title_attributes(user_input, analysis, subject, seo_keyword_plan, attribute_confidence),
+            seo_keyword_plan,
+            brand=CardGenerator._brand(user_input),
+        )
+        title = str(title_payload.get("title") or "").strip()
+        if not title:
+            pieces = [analysis.product_name or user_input.category or default_category, analysis.fit_type]
+            title = " ".join(str(piece).strip() for piece in pieces if piece).strip()[:60].strip()
+        return cleanup_title(title, default_category, analysis, user_input)
 
     @staticmethod
-    def _description(analysis: ImageAnalysis, title: str) -> str:
-        product_name = (analysis.product_name or title).lower()
-        material = (analysis.material or "качественных материалов").lower()
-        fit = (analysis.fit_type or "свободного кроя").lower()
-        features = ", ".join(analysis.features[:3]).lower() if analysis.features else ""
-        
-        gender = (analysis.gender or "женский").lower()
-        if "муж" in gender:
-            audience = "для мужчин, молодых людей, подростков, школьников и студентов"
-            occasions = "для школы, учебы, офиса, работы, прогулок и повседневной носки"
-        elif "дет" in gender or "мальчик" in gender:
-            audience = "для мальчиков, подростков и школьников"
-            occasions = "в школу, на учебу, для прогулок и на каждый день"
-        elif "дев" in gender:
-            audience = "для девочек, подростков и школьниц"
-            occasions = "в школу, на учебу, для прогулок и на каждый день"
-        else:
-            audience = "для женщин, девушек, подростков, школьниц и студенток"
-            occasions = "для школы, учебы, офиса, работы, прогулок и повседневной носки"
+    def _description(analysis: ImageAnalysis, user_input: ProductInput, subject: dict[str, Any], title: str) -> str:
+        policy = resolve_product_family(subject, analysis, user_input)
+        text = render_description(policy, title=title, analysis=analysis, user_input=user_input)
+        return cleanup_description(text, title=title, subject=subject, analysis=analysis, user_input=user_input)
 
-        features_clause = f" с такими деталями, как {features}," if features else ""
-        
-        text = (
-            f"Стильные {product_name} {fit} — идеальный выбор {audience}. "
-            f"Выполненные из {material},{features_clause} они обеспечивают исключительный комфорт "
-            f"и свободу движений в течение всего дня. Эта универсальная модель разработана "
-            f"специально {occasions}. Благодаря лаконичному дизайну, они легко сочетаются с "
-            f"любыми базовыми элементами гардероба, позволяя создавать как строгие учебные и деловые образы, "
-            f"так и более расслабленные повседневные аутфиты. Прекрасный вариант на каждый день, который "
-            f"подарит уверенность и подчеркнет ваш стиль."
-        )
-        return text[:1000]
+    @staticmethod
+    def _title_attributes(
+        user_input: ProductInput,
+        analysis: ImageAnalysis,
+        subject: dict[str, Any],
+        seo_keyword_plan: dict[str, Any],
+        attribute_confidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        confirmed = (attribute_confidence or {}).get("confirmed_attributes") or {}
+        inferred = (attribute_confidence or {}).get("inferred_attributes") or {}
+        seo_inputs = user_input.seo_inputs if user_input else None
+        return {
+            "material": getattr(seo_inputs, "material", None) or confirmed.get("composition") or inferred.get("composition") or analysis.material,
+            "color": getattr(seo_inputs, "color", None) or confirmed.get("color") or inferred.get("color") or analysis.color or user_input.color,
+            "fit": getattr(seo_inputs, "fit", None) or confirmed.get("fit") or inferred.get("fit") or analysis.fit_type,
+            "season": getattr(seo_inputs, "season", None) or confirmed.get("season") or inferred.get("season") or analysis.season,
+            "quantity_in_set": getattr(seo_inputs, "quantity_in_set", None),
+            "key_feature": getattr(seo_inputs, "key_feature", None),
+            "subject": subject.get("subjectName"),
+            "primary_keyword": seo_keyword_plan.get("primary_keyword"),
+        }
 
     @staticmethod
     def _sizes(user_input: ProductInput, intent: ProductIntent | None = None) -> list[SizeItem]:

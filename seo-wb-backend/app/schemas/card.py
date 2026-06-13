@@ -4,6 +4,20 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 
+class SeoInputs(BaseModel):
+    material: str | None = Field(default=None, max_length=160)
+    color: str | None = Field(default=None, max_length=120)
+    fit: str | None = Field(default=None, max_length=160)
+    pattern: str | None = Field(default=None, max_length=160)
+    season: str | None = Field(default=None, max_length=120)
+    purpose: str | None = Field(default=None, max_length=240)
+    target_audience: str | None = Field(default=None, max_length=160)
+    quantity_in_set: str | None = Field(default=None, max_length=80)
+    key_feature: str | None = Field(default=None, max_length=240)
+    primary_keyword_override: str | None = Field(default=None, max_length=240)
+    secondary_keywords: list[str] = Field(default_factory=list)
+
+
 class ProductInput(BaseModel):
     category: str | None = Field(default=None, max_length=160)
     subject_id: int | None = None
@@ -15,6 +29,7 @@ class ProductInput(BaseModel):
     dimensions: dict[str, Any] = Field(default_factory=dict)
     note: str | None = Field(default=None, max_length=3000)
     attributes: dict[str, Any] = Field(default_factory=dict)
+    seo_inputs: SeoInputs | None = None
 
 
 class ImageAnalysis(BaseModel):
@@ -84,6 +99,10 @@ class CardGenerateResponse(BaseModel):
     analysis: ImageAnalysis
     card_payload: list[CardUploadGroup]
     warnings: list[str] = Field(default_factory=list)
+    seo_keyword_plan: dict[str, Any] | None = None
+    seo_score: dict[str, Any] | None = None
+    seo_issues: list[str] = Field(default_factory=list)
+    attribute_confidence: dict[str, Any] | None = None
 
 
 class DraftResponse(BaseModel):
@@ -94,6 +113,10 @@ class DraftResponse(BaseModel):
     analysis: dict[str, Any]
     card_payload: Any
     wb_response: dict[str, Any] | None = None
+    seo_keyword_plan: dict[str, Any] | None = None
+    seo_score: dict[str, Any] | None = None
+    seo_issues: list[str] = Field(default_factory=list)
+    attribute_confidence: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -118,6 +141,10 @@ class CardJobResponse(BaseModel):
 
 class DraftUpdateRequest(BaseModel):
     card_payload: list[CardUploadGroup]
+
+
+class AcceptLowConfidenceAttributesRequest(BaseModel):
+    attribute_keys: list[str] = Field(min_length=1, max_length=20)
 
 
 class PushDraftRequest(BaseModel):

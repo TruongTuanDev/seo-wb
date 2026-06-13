@@ -93,6 +93,13 @@ class AdminAiSettings(Base):
     validation_threshold: Mapped[int] = mapped_column(Integer, default=85, nullable=False)
     validation_failure_behavior: Mapped[str] = mapped_column(String(16), default="warn", nullable=False)
     allow_legacy_vton: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    seo_engine_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    seo_min_score: Mapped[int] = mapped_column(Integer, default=70, nullable=False)
+    description_min_chars: Mapped[int] = mapped_column(Integer, default=600, nullable=False)
+    description_max_chars: Mapped[int] = mapped_column(Integer, default=900, nullable=False)
+    seo_repair_max_attempts: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    require_primary_keyword_in_title: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    warn_low_confidence_attributes: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
