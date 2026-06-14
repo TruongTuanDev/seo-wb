@@ -1,9 +1,11 @@
+import base64
 import json
 import time
 from io import BytesIO
 
 from google import genai
 from google.genai import types
+from openai import OpenAI
 from PIL import Image, UnidentifiedImageError
 
 from app.core.config import Settings
@@ -71,10 +73,12 @@ ANALYSIS_SCHEMA = {
 
 class GeminiAnalyzer:
     def __init__(self, settings: Settings):
-        if not settings.gemini_api_key:
-            raise AppError("missing_gemini_key", "GEMINI_API_KEY is missing.", 500)
+        if not settings.gemini_api_key and not (settings.openai_api_key and settings.openai_card_model):
+            raise AppError("missing_analysis_provider", "Gemini or OpenAI vision configuration is required.", 500)
         self._model = settings.gemini_model
-        self._client = genai.Client(api_key=settings.gemini_api_key)
+        self._client = genai.Client(api_key=settings.gemini_api_key) if settings.gemini_api_key else None
+        self._openai_model = settings.openai_card_model
+        self._openai_client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key and settings.openai_card_model else None
 
     def analyze(self, image_bytes_list: list[bytes], user_input: ProductInput) -> ImageAnalysis:
         if not image_bytes_list:
@@ -83,28 +87,47 @@ class GeminiAnalyzer:
         images = [self._load_image(image_bytes) for image_bytes in image_bytes_list]
         prompt = self._build_prompt(user_input)
         last_exc: Exception | None = None
-        for attempt in range(1, 4):
+        response_text: str | None = None
+        if self._client:
+            for attempt in range(1, 4):
+                try:
+                    response = self._client.models.generate_content(
+                        model=self._model,
+                        contents=[prompt, *images],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=ANALYSIS_SCHEMA,
+                            temperature=0.1,
+                        ),
+                    )
+                    response_text = response.text
+                    break
+                except Exception as exc:
+                    last_exc = exc
+                    if self._is_non_retryable_quota_error(exc):
+                        break
+                    if attempt < 3:
+                        time.sleep(1.5 * attempt)
+
+        if response_text is None and self._openai_client:
             try:
-                response = self._client.models.generate_content(
-                    model=self._model,
-                    contents=[prompt, *images],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=ANALYSIS_SCHEMA,
-                        temperature=0.1,
-                    ),
-                )
-                break
+                response_text = self._analyze_with_openai(image_bytes_list, prompt)
             except Exception as exc:
                 last_exc = exc
-                if attempt < 3:
-                    time.sleep(1.5 * attempt)
-        else:
-            raise AppError("gemini_failed", "Gemini image analysis failed.", 502, {"reason": str(last_exc)[:500]}) from last_exc
+
+        if response_text is None:
+            raise AppError(
+                "image_analysis_failed",
+                "Image analysis providers are unavailable.",
+                503,
+                {"reason": str(last_exc)[:500]},
+            ) from last_exc
 
         try:
-            raw = json.loads(response.text or "{}")
+            raw = json.loads(response_text or "{}")
             raw = self._normalize_analysis(raw)
+            if last_exc is not None:
+                raw["warnings"].append("Gemini unavailable; image analysis used OpenAI fallback.")
             raw["source_image_count"] = len(images)
             from app.services.studio_recommender import recommend_for_product
             raw["recommendations"] = recommend_for_product(raw, user_input)
@@ -112,10 +135,31 @@ class GeminiAnalyzer:
         except Exception as exc:
             raise AppError(
                 "gemini_invalid_json",
-                "Gemini returned invalid analysis JSON.",
+                "Image analysis provider returned invalid JSON.",
                 502,
-                {"raw": (response.text or "")[:1000]},
+                {"raw": (response_text or "")[:1000]},
             ) from exc
+
+    def _analyze_with_openai(self, image_bytes_list: list[bytes], prompt: str) -> str:
+        content: list[dict] = [{"type": "text", "text": prompt}]
+        for image_bytes in image_bytes_list:
+            encoded = base64.b64encode(image_bytes).decode("ascii")
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}})
+        response = self._openai_client.chat.completions.create(
+            model=self._openai_model,
+            messages=[
+                {"role": "system", "content": "Analyze fashion product images and return JSON only."},
+                {"role": "user", "content": content},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.1,
+        )
+        return response.choices[0].message.content or "{}"
+
+    @staticmethod
+    def _is_non_retryable_quota_error(exc: Exception) -> bool:
+        message = str(exc).casefold()
+        return any(marker in message for marker in ("resource_exhausted", "prepayment credits are depleted", "billing"))
 
     @staticmethod
     def _normalize_analysis(raw: dict) -> dict:

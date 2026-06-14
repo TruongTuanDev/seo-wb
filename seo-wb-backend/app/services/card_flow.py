@@ -109,6 +109,7 @@ class CardFlowService:
             subject=subject,
             analysis=analysis,
             user_input=user_input,
+            wb_characteristics=charcs,
         )
         analysis_payload["seo_score"] = seo_score
         analysis_payload["seo_issues"] = seo_score.get("issues", [])
@@ -130,7 +131,7 @@ class CardFlowService:
     async def push_new_cards(self, groups: list[CardUploadGroup], dry_run: bool) -> dict[str, Any] | None:
         payload = [group.model_dump(mode="json", exclude_none=True) for group in groups]
         for group in payload:
-            await self._enrich_payload([group], int(group["subjectID"]))
+            await self._enrich_payload([group], int(group["subjectID"]), enforce_required=True)
         await self._ensure_skus(payload, dry_run=dry_run)
         if dry_run:
             return None
@@ -144,7 +145,7 @@ class CardFlowService:
         subject_id: int | None = None,
     ) -> dict[str, Any] | None:
         if subject_id is not None:
-            await self._enrich_payload({"cardsToAdd": variants}, subject_id)
+            await self._enrich_payload({"cardsToAdd": variants}, subject_id, enforce_required=True)
         await self._ensure_variant_skus(variants, dry_run=dry_run)
         if dry_run:
             return None
@@ -246,6 +247,7 @@ class CardFlowService:
         *,
         user_input: ProductInput | None = None,
         analysis: ImageAnalysis | None = None,
+        enforce_required: bool = False,
     ) -> None:
         charcs = await self._wb.get_subject_charcs(subject_id, locale="ru")
         seasons = await self._wb.get_seasons(locale="ru")
@@ -258,6 +260,42 @@ class CardFlowService:
             user_input=user_input,
             analysis=analysis,
         )
+        finalize_vendor_codes = getattr(CardGenerator, "finalize_vendor_codes_from_characteristics", None)
+        if finalize_vendor_codes:
+            finalize_vendor_codes(payload, charcs)
+        if enforce_required:
+            self._ensure_required_characteristics(payload, charcs)
+
+    @staticmethod
+    def _ensure_required_characteristics(payload: Any, charcs: list[dict[str, Any]]) -> None:
+        required = {
+            int(item["charcID"]): str(item.get("name") or item["charcID"])
+            for item in charcs
+            if item.get("required") and item.get("charcID")
+        }
+        if not required:
+            return
+        variants: list[dict[str, Any]] = []
+        if isinstance(payload, list):
+            for group in payload:
+                if isinstance(group, dict):
+                    variants.extend(group.get("variants") or [])
+        elif isinstance(payload, dict):
+            variants.extend(payload.get("cardsToAdd") or payload.get("variants") or [])
+        for index, variant in enumerate(variants):
+            present = {
+                int(item.get("id") or 0)
+                for item in variant.get("characteristics") or []
+                if item.get("value") not in (None, "", [])
+            }
+            missing = [name for charc_id, name in required.items() if charc_id not in present]
+            if missing:
+                raise AppError(
+                    "missing_required_characteristics",
+                    "Required Wildberries characteristics must be confirmed before push.",
+                    422,
+                    {"variant_index": index, "missing": missing},
+                )
 
     def _apply_seo_validation(
         self,
@@ -269,6 +307,7 @@ class CardFlowService:
         subject: dict[str, Any] | None = None,
         analysis: ImageAnalysis | None = None,
         user_input: ProductInput | None = None,
+        wb_characteristics: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         min_chars = int(getattr(runtime_settings, "description_min_chars", 600) or 600)
         max_chars = int(getattr(runtime_settings, "description_max_chars", 900) or 900)
@@ -345,12 +384,15 @@ class CardFlowService:
                         confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
                         inferred_attributes=attribute_confidence.get("inferred_attributes"),
                         subject_name=(subject or {}).get("subjectName"),
+                        wb_characteristics=wb_characteristics,
+                        low_confidence_attributes=attribute_confidence.get("low_confidence_attributes"),
                     )
                     if (
                         candidate_scorecard.get("seo_score", 0) >= min_score
                         and candidate_scorecard.get("grammar_score", 0) >= min_grammar_score
                         and candidate_scorecard.get("marketplace_score", 0) >= min_marketplace_score
                         and candidate_scorecard.get("critical_attribute_score", 0) >= min_critical_attribute_score
+                        and not candidate_scorecard.get("blocking_issues")
                         and final_validator_result.get("valid", False)
                     ):
                         break
@@ -398,6 +440,8 @@ class CardFlowService:
                         confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
                         inferred_attributes=attribute_confidence.get("inferred_attributes"),
                         subject_name=(subject or {}).get("subjectName"),
+                        wb_characteristics=wb_characteristics,
+                        low_confidence_attributes=attribute_confidence.get("low_confidence_attributes"),
                     )
                 )
         if not scorecards:
@@ -420,19 +464,28 @@ class CardFlowService:
             "keyword_score": int(round(sum(item.get("keyword_score", 0) for item in scorecards) / len(scorecards))),
             "grammar_score": int(round(sum(item.get("grammar_score", 0) for item in scorecards) / len(scorecards))),
             "marketplace_score": int(round(sum(item.get("marketplace_score", 0) for item in scorecards) / len(scorecards))),
+            "subject_rule_score": int(round(sum(item.get("subject_rule_score", 0) for item in scorecards) / len(scorecards))),
             "critical_attribute_score": int(round(sum(item.get("critical_attribute_score", 0) for item in scorecards) / len(scorecards))),
+            "semantic_consistency_score": int(round(sum(item.get("semantic_consistency_score", 0) for item in scorecards) / len(scorecards))),
             "issues": [],
             "suggestions": [],
+            "blocking_issues": [],
             "status": "poor",
             "variants": scorecards,
         }
         for item in scorecards:
             aggregate["issues"].extend(item.get("issues", []))
             aggregate["suggestions"].extend(item.get("suggestions", []))
+            aggregate["blocking_issues"].extend(item.get("blocking_issues", []))
         aggregate["issues"] = list(dict.fromkeys(aggregate["issues"]))[:10]
         aggregate["suggestions"] = list(dict.fromkeys(aggregate["suggestions"]))[:10]
+        aggregate["blocking_issues"] = list(dict.fromkeys(aggregate["blocking_issues"]))
         score = aggregate["seo_score"]
-        aggregate["status"] = "excellent" if score >= 85 else "good" if score >= 70 else "needs_review" if score >= 50 else "poor"
+        aggregate["status"] = (
+            "needs_review"
+            if aggregate["blocking_issues"]
+            else "excellent" if score >= 85 else "good" if score >= 70 else "needs_review" if score >= 50 else "poor"
+        )
         return aggregate
 
     @staticmethod

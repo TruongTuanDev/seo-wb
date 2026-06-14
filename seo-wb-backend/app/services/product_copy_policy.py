@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.schemas.card import ImageAnalysis, ProductInput
+from app.services.subject_rule_registry import SubjectRuleRegistry
 from app.services.title_template_registry import TitleTemplateRegistry
 
 
@@ -126,8 +127,15 @@ def build_copy_policy_context(
     user_input: ProductInput | None,
 ) -> dict[str, Any]:
     policy = resolve_product_family(subject, analysis, user_input)
+    subject_rule = SubjectRuleRegistry.resolve_from_context(
+        subject.get("subjectName") if subject else "",
+        analysis.category if analysis else "",
+        analysis.product_name if analysis else "",
+        user_input.category if user_input else "",
+    )
     return {
         "family": policy.family,
+        "subject_code": subject_rule.subject_code if subject_rule else None,
         "focus_points": policy.focus_points,
         "use_cases": policy.use_cases,
         "forbidden_phrases": policy.forbidden_phrases,
@@ -155,11 +163,11 @@ def build_seo_title(
     key_feature = _pick_attribute(attributes, "key_feature", "feature")
 
     registry_attributes = {
-        "main_attribute": _pick_attribute(attributes, "pants_model", "model") or fit or key_feature or material,
+        "main_attribute": _pick_attribute(attributes, "pants_model", "model") or fit or key_feature,
         "fit": fit,
-        "secondary_attribute": key_feature or color or season or material,
-        "material": material,
-        "color": color,
+        "secondary_attribute": key_feature,
+        "material": None,
+        "color": None,
         "rise": fit,
         "decor": _pick_attribute(attributes, "decor", "pattern"),
         "length": _pick_attribute(attributes, "length", "Длина изделия"),
@@ -169,6 +177,14 @@ def build_seo_title(
         "model": _pick_attribute(attributes, "pants_model", "model"),
         "quantity_in_set": quantity,
         "hood_feature": key_feature or fit,
+        "detail": _pick_attribute(attributes, "detail", "decor", "pattern", "feature"),
+        "style": _pick_attribute(attributes, "style", "fit", "model"),
+        "silhouette": _pick_attribute(attributes, "silhouette", "fit", "model"),
+        "purpose": _pick_attribute(attributes, "purpose", "occasion"),
+        "bra_type": _pick_attribute(attributes, "bra_type", "type"),
+        "wire_state": _pick_attribute(attributes, "wire_state", "support"),
+        "effect": _pick_attribute(attributes, "effect", "feature"),
+        "panties_type": _pick_attribute(attributes, "panties_type", "type", "model"),
     }
     title = TitleTemplateRegistry.build_title(
         subject_name=subject or "Товар",
@@ -242,12 +258,14 @@ def cleanup_description(
     policy = resolve_product_family(subject, analysis, user_input)
     normalized = _normalize_spaces(description)
     if not normalized:
-        return render_description(policy, title=title, analysis=analysis, user_input=user_input)
+        return _sanitize_description(render_description(policy, title=title, analysis=analysis, user_input=user_input), analysis, user_input)
     if any(phrase in normalized.casefold() for phrase in policy.forbidden_phrases):
-        return render_description(policy, title=title, analysis=analysis, user_input=user_input)
+        return _sanitize_description(render_description(policy, title=title, analysis=analysis, user_input=user_input), analysis, user_input)
+    if _contains_forbidden_description_content(normalized, analysis=analysis, user_input=user_input):
+        return _sanitize_description(render_description(policy, title=title, analysis=analysis, user_input=user_input), analysis, user_input)
     if len(normalized) < 220:
-        return render_description(policy, title=title, analysis=analysis, user_input=user_input)
-    return normalized[:1000]
+        return _sanitize_description(render_description(policy, title=title, analysis=analysis, user_input=user_input), analysis, user_input)
+    return _sanitize_description(normalized[:1000], analysis, user_input)
 
 
 def render_description(
@@ -257,6 +275,15 @@ def render_description(
     analysis: ImageAnalysis | None,
     user_input: ProductInput | None,
 ) -> str:
+    subject_rule = SubjectRuleRegistry.resolve_from_context(
+        analysis.category if analysis else "",
+        analysis.product_name if analysis else "",
+        user_input.category if user_input else "",
+        title,
+    )
+    if subject_rule is not None:
+        return _render_subject_description(subject_rule, policy=policy, title=title, analysis=analysis, user_input=user_input)
+
     product_name = (analysis.product_name if analysis and analysis.product_name else title).strip().lower()
     material = (analysis.material if analysis and analysis.material else "качественного материала").strip().lower()
     color = str(analysis.color if analysis and analysis.color else user_input.color if user_input and user_input.color else "").strip().lower()
@@ -272,8 +299,6 @@ def render_description(
             f"Модель из {material} создана для ежедневного комфорта: {focus_text} помогают ребенку чувствовать себя удобно "
             "в школе, на прогулке и во время активных игр."
         )
-        if color:
-            benefits += f" Цвет {color} выглядит аккуратно и легко вписывается в детский гардероб."
         if feature_text:
             benefits += f" Детали и принты, включая {feature_text}, делают комплект более заметным и приятным для ребенка."
         use_case_sentence = (
@@ -288,17 +313,28 @@ def render_description(
         return text[:1000]
 
     if policy.family == "bottoms":
-        opening = f"Широкие джинсы из {material} сочетают комфорт, актуальный силуэт и удобство на каждый день."
+        source = " ".join(
+            str(part or "")
+            for part in [
+                title,
+                analysis.product_name if analysis else "",
+                analysis.category if analysis else "",
+                user_input.category if user_input else "",
+            ]
+        ).casefold()
+        is_jeans = any(token in source for token in ["джинс", "jeans", "деним"])
+        product_label = "джинсы" if is_jeans else "брюки"
+        fit_value = (analysis.fit_type if analysis and analysis.fit_type else "").strip().lower()
+        fit_phrase = "широкие " if "шир" in fit_value else "свободные " if fit_value else ""
+        opening = f"{fit_phrase}{product_label} из {material} сочетают комфорт, актуальный силуэт и удобство на каждый день."
         benefits = (
             "Модель помогает создать современный расслабленный образ, а высокая посадка подчеркивает талию "
             "и делает посадку более удобной в движении."
         )
-        if color:
-            benefits += f" Голубой оттенок {color if color != 'голубой' else 'денима'} легко сочетается с футболками, худи и базовыми топами."
         if feature_text:
             benefits += f" Детали модели, включая {feature_text}, добавляют образу выразительность без перегруженного декора."
         use_case_sentence = (
-            f"Такие джинсы подходят для сценариев {use_cases} и хорошо работают как базовая модель на сезонную и повседневную носку."
+            f"Такие {product_label} подходят для сценариев {use_cases} и хорошо работают как базовая модель на сезонную и повседневную носку."
         )
         closing = "Уход: бережная стирка при 30 градусах, не отбеливать, гладить при низкой температуре."
         text = _normalize_spaces(" ".join([opening, benefits, use_case_sentence, closing]))
@@ -309,8 +345,6 @@ def render_description(
 
     opening = f"{product_name[:1].upper() + product_name[1:]} из {material} подходит {audience}."
     benefits = f"Модель делает акцент на таких качествах, как {focus_text}, поэтому остается удобной в течение дня."
-    if color:
-        benefits += f" Цвет {color} легко вписывается в ассортимент и выглядит аккуратно после повседневной носки."
     if feature_text:
         benefits += f" В конструкции особенно заметны {feature_text}, что помогает точнее передать преимущества товара в карточке."
 
@@ -357,20 +391,167 @@ def suggest_characteristics(
     age_hint = _extract_age_hint(analysis, user_input)
     if age_hint:
         suggestions["age_limits"] = age_hint
+    subject_rule = SubjectRuleRegistry.resolve_from_context(
+        subject.get("subjectName") if subject else "",
+        analysis.category if analysis else "",
+        analysis.product_name if analysis else "",
+        user_input.category if user_input else "",
+    )
+    if subject_rule:
+        defaults = subject_rule.attribute_inference_rules
+        if defaults.get("closure_default"):
+            suggestions.setdefault("closure", str(defaults["closure_default"]))
+        if defaults.get("pattern_default"):
+            suggestions.setdefault("pattern", str(defaults["pattern_default"]))
     return suggestions
+
+
+def _render_subject_description(
+    rule: Any,
+    *,
+    policy: ProductFamilyPolicy,
+    title: str,
+    analysis: ImageAnalysis | None,
+    user_input: ProductInput | None,
+) -> str:
+    material = (analysis.material if analysis and analysis.material else "качественный материал").strip().lower()
+    fit = str(analysis.fit_type if analysis and analysis.fit_type else "").strip().lower()
+    product_name = str(analysis.product_name if analysis and analysis.product_name else title).strip().lower()
+    features = [str(item).strip().lower() for item in ((analysis.features if analysis else []) or []) if str(item).strip()]
+    use_cases = ", ".join(policy.use_cases)
+    context = {
+        "subject_label": rule.ru_names[0],
+        "subject_label_cap": rule.ru_names[0][:1].upper() + rule.ru_names[0][1:],
+        "material": material,
+        "use_cases": use_cases,
+        "fit_sentence": _fit_sentence(rule.subject_code, fit),
+        "rise_sentence": _rise_sentence(fit),
+        "length_sentence": _length_sentence(product_name, features),
+        "color_sentence": "",
+    }
+    blueprint = rule.description_blueprint
+    parts = [
+        blueprint.get("opening", "").format(**context),
+        blueprint.get("fit", "").format(**context),
+        blueprint.get("material", "").format(**context),
+        blueprint.get("use_case", "").format(**context),
+        blueprint.get("care", "").format(**context),
+    ]
+    text = _normalize_spaces(" ".join(part for part in parts if part))
+    if any(term in text.casefold() for term in rule.forbidden_terms):
+        text = text.replace("  ", " ")
+    while len(text) < 420:
+        text = _normalize_spaces(f"{text} {_support_sentence(policy, analysis)}")
+    return text[:1000]
+
+
+def _fit_sentence(subject_code: str, fit: str) -> str:
+    if not fit:
+        return "Крой остается удобным и уместным для своей категории."
+    if "шир" in fit:
+        return "Свободный крой помогает сохранить комфорт и современный силуэт."
+    if "прям" in fit:
+        return "Прямой крой выглядит аккуратно и остается удобным на каждый день."
+    if "облег" in fit or "скинни" in fit:
+        return "Более прилегающий крой подчеркивает силуэт и сохраняет комфортную посадку."
+    if subject_code in {"bra", "panties"}:
+        return "Посадка рассчитана на комфортное прилегание без лишнего давления."
+    return f"Крой {fit} помогает сохранить уместный силуэт и комфорт в носке."
+
+
+def _rise_sentence(fit: str) -> str:
+    if "высок" in fit:
+        return "Высокая посадка подчеркивает линию талии и делает модель удобной в движении."
+    if "низк" in fit:
+        return "Низкая посадка поддерживает расслабленный характер модели."
+    if "сред" in fit:
+        return "Средняя посадка остается универсальной для повседневной носки."
+    return ""
+
+
+def _length_sentence(product_name: str, features: list[str]) -> str:
+    source = " ".join([product_name, *features]).casefold()
+    if "мини" in source:
+        return "Длина мини делает силуэт более легким и акцентным."
+    if "миди" in source:
+        return "Длина миди остается универсальной и удобной для повседневных образов."
+    if "макси" in source:
+        return "Длина макси помогает создать более выразительный и цельный образ."
+    return ""
 
 
 def _support_sentence(policy: ProductFamilyPolicy, analysis: ImageAnalysis | None) -> str:
     fit = (analysis.fit_type if analysis and analysis.fit_type else "").strip().lower()
-    season = (analysis.season if analysis and analysis.season else "").strip().lower()
     parts = []
     if fit:
-        parts.append(f"Посадка {fit} помогает сохранить уместный характер товара без искажения категории.")
-    if season:
-        parts.append(f"Сезонность {season} поддерживает релевантные поисковые запросы и фильтры.")
+        parts.append(f"Посадка {fit} поддерживает комфорт в движении и аккуратный силуэт.")
     if not parts:
-        parts.append(f"Описание сохраняет акцент на категории {policy.family} и поддерживает релевантные поисковые запросы.")
+        parts.append("Практичная конструкция помогает сохранить комфорт и аккуратный внешний вид в течение дня.")
     return " ".join(parts)
+
+
+def _contains_forbidden_description_content(
+    text: str,
+    *,
+    analysis: ImageAnalysis | None,
+    user_input: ProductInput | None,
+) -> bool:
+    source = text.casefold()
+    forbidden_markers = (
+        "актуальные поисковые фразы",
+        "в описании естественно раскрыты детали модели",
+        "описание раскрывает материал",
+        "релевантные поисковые запросы",
+    )
+    if any(marker in source for marker in forbidden_markers):
+        return True
+    color_values = [
+        analysis.color if analysis else None,
+        user_input.color if user_input else None,
+        *[
+            item.get("value")
+            for item in ((analysis.variant_colors if analysis else []) or [])
+            if isinstance(item, dict)
+        ],
+    ]
+    return any(str(value).strip().casefold() in source for value in color_values if str(value or "").strip())
+
+
+def _sanitize_description(
+    text: str,
+    analysis: ImageAnalysis | None,
+    user_input: ProductInput | None,
+) -> str:
+    color_values = {
+        str(value).strip().casefold()
+        for value in [
+            analysis.color if analysis else None,
+            user_input.color if user_input else None,
+            *[
+                item.get("value")
+                for item in ((analysis.variant_colors if analysis else []) or [])
+                if isinstance(item, dict)
+            ],
+        ]
+        if str(value or "").strip()
+    }
+    color_values.update({
+        "белый", "белая", "белые", "черный", "черная", "черные",
+        "красный", "красная", "красные", "синий", "синяя", "синие",
+        "голубой", "голубая", "голубые", "зеленый", "зеленая", "зеленые",
+        "желтый", "желтая", "желтые", "бежевый", "бежевая", "бежевые",
+        "фиолетовый", "фиолетовая", "фиолетовые", "розовый", "розовая", "розовые",
+        "серый", "серая", "серые", "коричневый", "коричневая", "коричневые",
+    })
+    kept: list[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", _normalize_spaces(text)):
+        normalized = sentence.casefold()
+        if re.search(r"\b(цвет|оттенок|цвета|оттенка)\b", normalized):
+            continue
+        if any(re.search(rf"(?<!\w){re.escape(color)}(?!\w)", normalized) for color in color_values):
+            continue
+        kept.append(sentence)
+    return _normalize_spaces(" ".join(kept))[:1000]
 
 
 def _audience_phrase(analysis: ImageAnalysis | None, user_input: ProductInput | None) -> str:

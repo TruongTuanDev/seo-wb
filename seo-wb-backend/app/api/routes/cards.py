@@ -1720,29 +1720,47 @@ async def _recompute_draft_seo(
             variant["description"] = validator_result.get("fixed_description") or variant.get("description")
             issues.extend(validator_result.get("issues", []))
             suggestions.extend(validator_result.get("suggestions", []))
-            scorecards.append(
-                SeoContentValidator.build_scorecard(
+            scorecard = SeoContentValidator.build_scorecard(
                     title=str(variant.get("title") or ""),
                     description=str(variant.get("description") or ""),
                     seo_keyword_plan=seo_keyword_plan,
                     validator_result=validator_result,
                     confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
                     inferred_attributes=attribute_confidence.get("inferred_attributes"),
+                    subject_name=subject.get("subjectName"),
+                    wb_characteristics=charcs,
+                    low_confidence_attributes=attribute_confidence.get("low_confidence_attributes"),
                 )
-            )
+            scorecards.append(scorecard)
+            issues.extend(scorecard.get("issues", []))
+            suggestions.extend(scorecard.get("suggestions", []))
     aggregate = {
         "seo_score": int(round(sum(item.get("seo_score", 0) for item in scorecards) / max(1, len(scorecards)))),
         "title_score": int(round(sum(item.get("title_score", 0) for item in scorecards) / max(1, len(scorecards)))),
         "description_score": int(round(sum(item.get("description_score", 0) for item in scorecards) / max(1, len(scorecards)))),
         "attributes_score": int(round(sum(item.get("attributes_score", 0) for item in scorecards) / max(1, len(scorecards)))),
         "keyword_coverage_score": int(round(sum(item.get("keyword_coverage_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "grammar_score": int(round(sum(item.get("grammar_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "marketplace_score": int(round(sum(item.get("marketplace_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "subject_rule_score": int(round(sum(item.get("subject_rule_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "critical_attribute_score": int(round(sum(item.get("critical_attribute_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "semantic_consistency_score": int(round(sum(item.get("semantic_consistency_score", 0) for item in scorecards) / max(1, len(scorecards)))),
         "issues": list(dict.fromkeys(issues))[:10],
         "suggestions": list(dict.fromkeys(suggestions))[:10],
+        "blocking_issues": list(dict.fromkeys(
+            issue
+            for item in scorecards
+            for issue in item.get("blocking_issues", [])
+        )),
         "status": "poor",
         "variants": scorecards,
     }
     score = aggregate["seo_score"]
-    aggregate["status"] = "excellent" if score >= 85 else "good" if score >= 70 else "needs_review" if score >= 50 else "poor"
+    aggregate["status"] = (
+        "needs_review"
+        if aggregate["blocking_issues"]
+        else "excellent" if score >= 85 else "good" if score >= 70 else "needs_review" if score >= 50 else "poor"
+    )
 
     next_analysis = dict(analysis)
     next_analysis["product_input"] = product_input.model_dump(mode="json", exclude_none=True)

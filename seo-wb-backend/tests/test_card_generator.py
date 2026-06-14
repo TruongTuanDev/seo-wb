@@ -32,6 +32,49 @@ def test_apply_intent_uses_russian_vendor_color_suffix():
     assert raw[0]["variants"][0]["vendorCode"] == "234/Черный"
 
 
+def test_existing_variant_color_characteristic_sets_russian_vendor_suffix():
+    raw = [
+        {
+            "subjectID": 12,
+            "variants": [
+                {
+                    "vendorCode": "CHANGE-ME",
+                    "title": "Брюки широкие",
+                    "description": "Описание",
+                    "brand": "Test Brand",
+                    "dimensions": {"length": 30, "width": 20, "height": 4, "weightBrutto": 0.4},
+                    "characteristics": [{"id": 77, "value": ["синий"]}],
+                    "sizes": [{"techSize": "S", "wbSize": "42", "skus": []}],
+                }
+            ],
+        }
+    ]
+    user_input = ProductInput(vendor_code="234")
+    intent = ProductIntent(colors=[])
+
+    CardGenerator._apply_intent_to_raw(raw, user_input, intent, charcs=[{"charcID": 77, "name": "Цвет"}])
+
+    assert raw[0]["variants"][0]["vendorCode"] == "234/Синий"
+
+
+def test_final_vendor_suffix_uses_final_color_characteristic():
+    raw = [
+        {
+            "subjectID": 12,
+            "variants": [
+                {
+                    "vendorCode": "234/Синий",
+                    "characteristics": [{"id": 77, "value": ["красный"]}],
+                }
+            ],
+        }
+    ]
+
+    CardGenerator.finalize_vendor_codes_from_characteristics(raw, [{"charcID": 77, "name": "Цвет"}])
+
+    assert raw[0]["variants"][0]["vendorCode"] == "234/Красный"
+
+
 def test_cleanup_title_removes_duplicate_trailing_token():
     cleaned = cleanup_title(
         "Набор трусов-боксеров для мальчиков Человек-паук, 5 шт. Бокс",

@@ -1,51 +1,16 @@
 import re
 from typing import Any
 
+from app.services.subject_rule_registry import SubjectRuleRegistry
+
 
 class TitleTemplateRegistry:
-    _SUBJECT_RULES = [
-        {
-            "match": ("джинс", "jeans"),
-            "pattern": ["subject", "gender", "model", "rise_phrase", "decor"],
-            "force_gender": True,
-        },
-        {
-            "match": ("плать", "dress"),
-            "pattern": ["subject", "length", "occasion"],
-        },
-        {
-            "match": ("бюстгальтер", "bra"),
-            "pattern": ["subject", "construction", "support"],
-        },
-        {
-            "match": ("трус", "panties", "slip"),
-            "pattern": ["subject", "model", "material", "set_quantity"],
-        },
-        {
-            "match": ("худи", "hoodie"),
-            "pattern": ["subject", "fit", "hood_feature"],
-        },
-        {
-            "match": ("футбол", "t-shirt", "tshirt"),
-            "pattern": ["subject", "fit", "material"],
-        },
-    ]
-
     @classmethod
     def preferred_pattern(cls, subject_name: str | None) -> list[str]:
-        source = cls._norm(subject_name)
-        for rule in cls._SUBJECT_RULES:
-            if any(token in source for token in rule["match"]):
-                return list(rule["pattern"])
-        return ["subject", "main_attribute", "fit", "secondary_attribute"]
-
-    @classmethod
-    def _rule(cls, subject_name: str | None) -> dict[str, Any] | None:
-        source = cls._norm(subject_name)
-        for rule in cls._SUBJECT_RULES:
-            if any(token in source for token in rule["match"]):
-                return rule
-        return None
+        rule = SubjectRuleRegistry.resolve(subject_name)
+        if rule and rule.title_patterns:
+            return list(rule.title_patterns[0])
+        return ["subject", "main_attribute", "fit", "detail"]
 
     @classmethod
     def build_title(
@@ -57,37 +22,68 @@ class TitleTemplateRegistry:
         gender: str | None = None,
     ) -> str:
         attrs = attributes or {}
-        rule = cls._rule(subject_name) or {}
-        pattern = list(rule.get("pattern") or cls.preferred_pattern(subject_name))
+        rule = SubjectRuleRegistry.resolve(subject_name)
+        pattern = list(rule.title_patterns[0]) if rule and rule.title_patterns else cls.preferred_pattern(subject_name)
         slots = {
             "subject": cls._clean(subject_name),
-            "gender": cls._gender_value(gender),
+            # Marketplace rule: gender belongs in attributes, not in the title.
+            "gender": None,
             "main_attribute": cls._first(attrs, "main_attribute", "model", "construction", "feature", "purpose"),
             "fit": cls._first(attrs, "fit", "silhouette"),
-            "secondary_attribute": cls._first(attrs, "secondary_attribute", "material", "color", "season", "decor"),
-            "material": cls._first(attrs, "material"),
-            "color": cls._first(attrs, "color"),
+            "secondary_attribute": cls._first(attrs, "secondary_attribute", "decor", "detail"),
+            "material": None,
+            "color": None,
+            "material_or_color": None,
             "rise": cls._first(attrs, "rise"),
             "rise_phrase": cls._rise_phrase(cls._first(attrs, "rise")),
-            "decor": cls._first(attrs, "decor", "pattern"),
+            "decor": cls._first(attrs, "decor", "pattern", "detail"),
+            "detail": cls._first(attrs, "detail", "decor", "feature", "pattern"),
             "length": cls._first(attrs, "length"),
+            "length_sentence": cls._length_sentence(cls._first(attrs, "length")),
             "occasion": cls._first(attrs, "occasion", "purpose"),
+            "season": None,
+            "season_or_use": cls._first(attrs, "purpose", "occasion"),
             "construction": cls._first(attrs, "construction", "feature"),
             "support": cls._first(attrs, "support", "model"),
             "model": cls._first(attrs, "model"),
+            "style": cls._first(attrs, "style", "fit", "model"),
+            "silhouette": cls._first(attrs, "silhouette", "fit", "model"),
+            "fit_or_material": cls._first(attrs, "fit"),
+            "material_or_detail": cls._first(attrs, "detail", "decor"),
+            "hood_phrase": "с капюшоном",
             "set_quantity": cls._set_quantity(attrs),
             "hood_feature": cls._first(attrs, "hood_feature", "feature", "fit"),
+            "bra_type": cls._first(attrs, "bra_type", "type", "model"),
+            "wire_state": cls._wire_state(cls._first(attrs, "wire_state", "support", "construction")),
+            "effect": cls._first(attrs, "effect", "feature"),
+            "panties_type": cls._first(attrs, "panties_type", "type", "model"),
+            "purpose": cls._first(attrs, "purpose"),
         }
         parts: list[str] = []
         for key in pattern:
             value = slots.get(key)
-            if value:
-                if not parts or parts[-1].casefold() != value.casefold():
-                    parts.append(value)
-        if (include_gender_in_title or bool(rule.get("force_gender"))) and slots.get("gender") and "gender" not in pattern:
-            parts.insert(1, slots["gender"])
+            if value and (not parts or parts[-1].casefold() != value.casefold()):
+                parts.append(value)
         title = cls._normalize_spaces(" ".join(parts))
         return title.strip(",.-/ ")
+
+    @staticmethod
+    def _wire_state(value: str | None) -> str | None:
+        source = TitleTemplateRegistry._norm(value)
+        if not source:
+            return None
+        if any(token in source for token in ("без", "no", "none")):
+            return "без косточек"
+        if any(token in source for token in ("кост", "wire", "push")):
+            return "на косточках"
+        return TitleTemplateRegistry._clean(value)
+
+    @staticmethod
+    def _length_sentence(value: str | None) -> str | None:
+        text = TitleTemplateRegistry._clean(value)
+        if not text:
+            return None
+        return text
 
     @staticmethod
     def _set_quantity(attributes: dict[str, Any]) -> str | None:

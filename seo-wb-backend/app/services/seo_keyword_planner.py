@@ -30,32 +30,15 @@ class SeoKeywordPlanner:
     ) -> dict[str, Any]:
         seo_inputs = user_input.seo_inputs if user_input else None
         subject_source = (subject_name or category or analysis.category if analysis else category or "товар").strip()
-        gender_value = cls._first_non_empty(
-            getattr(seo_inputs, "target_audience", None),
-            gender,
-            analysis.gender if analysis else None,
-            user_input.gender if user_input else None,
-        )
         material = cls._first_non_empty(
             getattr(seo_inputs, "material", None),
             cls._lookup_attr(confirmed_attributes, "composition", "Состав", "material"),
             analysis.material if analysis else None,
         )
-        color = cls._first_non_empty(
-            getattr(seo_inputs, "color", None),
-            cls._lookup_attr(confirmed_attributes, "color", "Цвет"),
-            analysis.color if analysis else None,
-            user_input.color if user_input else None,
-        )
         fit = cls._first_non_empty(
             getattr(seo_inputs, "fit", None),
             cls._lookup_attr(confirmed_attributes, "fit", "Тип посадки", "Покрой"),
             analysis.fit_type if analysis else None,
-        )
-        season = cls._first_non_empty(
-            getattr(seo_inputs, "season", None),
-            cls._lookup_attr(confirmed_attributes, "season", "Сезон"),
-            analysis.season if analysis else None,
         )
         pattern = cls._first_non_empty(
             getattr(seo_inputs, "pattern", None),
@@ -69,8 +52,6 @@ class SeoKeywordPlanner:
             primary_keyword = seo_inputs.primary_keyword_override.strip()
         else:
             keyword_seed.extend(category_tokens[:3] or ["товар"])
-            if gender_value:
-                keyword_seed.extend(cls._tokenize(gender_value)[:2])
             if fit:
                 keyword_seed.extend(cls._tokenize(fit)[:3])
             primary_keyword = cls._normalize_phrase(" ".join(keyword_seed))
@@ -82,10 +63,9 @@ class SeoKeywordPlanner:
                 for item in getattr(seo_inputs, "secondary_keywords", []) or []
             ],
             cls._normalize_phrase(" ".join(filter(None, [subject_source, fit]))),
-            cls._normalize_phrase(" ".join(filter(None, [subject_source, color]))),
             cls._normalize_phrase(" ".join(filter(None, [subject_source, material]))),
-            cls._normalize_phrase(" ".join(filter(None, [subject_source, season]))),
             cls._normalize_phrase(" ".join(filter(None, [subject_source, pattern]))),
+            cls._normalize_phrase(" ".join(filter(None, [subject_source, key_feature]))),
             cls._normalize_phrase(" ".join(filter(None, [fit, subject_source]))),
         ]
         for candidate in secondary_candidates:
@@ -98,9 +78,8 @@ class SeoKeywordPlanner:
 
         long_tail_keywords: list[str] = []
         long_tail_candidates = [
-            cls._normalize_phrase(" ".join(filter(None, [gender_value, color, subject_source, fit]))),
             cls._normalize_phrase(" ".join(filter(None, [subject_source, material, "для", getattr(seo_inputs, "purpose", None)]))),
-            cls._normalize_phrase(" ".join(filter(None, [subject_source, key_feature, color]))),
+            cls._normalize_phrase(" ".join(filter(None, [subject_source, key_feature, fit]))),
         ]
         for candidate in long_tail_candidates:
             if candidate and candidate not in long_tail_keywords and len(candidate.split()) >= 3:
@@ -109,7 +88,6 @@ class SeoKeywordPlanner:
         must_have_entities = cls._dedupe_preserve(
             [
                 *cls._tokenize(primary_keyword),
-                *(cls._tokenize(color) if color else []),
                 *(cls._tokenize(fit) if fit else []),
                 *(cls._tokenize(material) if material else []),
             ]

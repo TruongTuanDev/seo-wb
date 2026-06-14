@@ -39,6 +39,8 @@ SYSTEM_PROMPT = (
     "- Если extracted_user_intent содержит несколько цветов, создай variant для каждого цвета. "
     "- Размеры S-42 преобразуй в techSize=S и wbSize=42. Одиночный размер S означает techSize=S и wbSize=S. "
     "- Если есть vendor_code, vendorCode должен быть base/РусскийЦвет."
+    "- В title запрещены пол/аудитория, возраст, цвет, бренд, сезон и состав/материал. "
+    "- В description запрещены конкретные названия цветов и списки поисковых фраз. "
 )
 
 
@@ -102,7 +104,7 @@ class CardGenerator:
             "image_analysis": analysis.model_dump(),
             "garment_analysis": garment_json,
             "seo_keyword_plan": seo_keyword_plan,
-            "title_formula": "[Product type] + [target audience/gender] + [main attribute] + [material/color/fit] + [quantity if set]",
+            "title_formula": "[Product type] + [model/fit] + [construction/detail] + [quantity if set]",
             "confirmed_attributes": confirmed_attributes,
             "inferred_attributes": inferred_attributes,
             "attribute_confidence": attribute_confidence,
@@ -401,7 +403,10 @@ class CardGenerator:
                 group["variants"] = expanded
             else:
                 for index, variant in enumerate(variants, 1):
-                    if variant.get("vendorCode") in {None, "", "CHANGE-ME"}:
+                    color_suffix = cls._variant_color_suffix(variant, color_charc_id)
+                    if color_suffix:
+                        variant["vendorCode"] = f"{vendor_base}/{color_suffix}"
+                    elif variant.get("vendorCode") in {None, "", "CHANGE-ME"}:
                         variant["vendorCode"] = f"{vendor_base}/{index}" if len(variants) > 1 else vendor_base
                     variant["brand"] = cls._brand(user_input)
                     variant["sizes"] = sizes
@@ -433,6 +438,22 @@ class CardGenerator:
         characteristics.append({"id": charc_id, "value": value})
 
     @staticmethod
+    def _variant_color_suffix(variant: dict[str, Any], color_charc_id: int | None) -> str | None:
+        if color_charc_id is None:
+            return None
+        for item in variant.get("characteristics") or []:
+            if not isinstance(item, dict) or int(item.get("id") or 0) != color_charc_id:
+                continue
+            raw_value = item.get("value")
+            if isinstance(raw_value, list):
+                color_value = next((str(entry).strip() for entry in raw_value if str(entry).strip()), "")
+            else:
+                color_value = str(raw_value or "").strip()
+            if color_value:
+                return ProductIntentParser.display_value_from_color(color_value)
+        return None
+
+    @staticmethod
     def _ensure_unique_vendor_codes(variants: list[dict[str, Any]]) -> None:
         seen: dict[str, int] = {}
         for variant in variants:
@@ -442,3 +463,26 @@ class CardGenerator:
             if count:
                 variant["vendorCode"] = f"{base}-{count + 1}"
             seen[key] = count + 1
+
+    @classmethod
+    def finalize_vendor_codes_from_characteristics(
+        cls,
+        payload: Any,
+        charcs: list[dict[str, Any]],
+    ) -> None:
+        color_charc_id = cls._find_charc_id(charcs, ["Цвет", "color"])
+        if color_charc_id is None:
+            return
+        groups = payload if isinstance(payload, list) else [payload]
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            variants = group.get("cardsToAdd") or group.get("variants") or []
+            for variant in variants:
+                color_suffix = cls._variant_color_suffix(variant, color_charc_id)
+                if not color_suffix:
+                    continue
+                current = str(variant.get("vendorCode") or "AUTO").strip() or "AUTO"
+                base = current.split("/", 1)[0]
+                variant["vendorCode"] = f"{base}/{color_suffix}"
+            cls._ensure_unique_vendor_codes(variants)

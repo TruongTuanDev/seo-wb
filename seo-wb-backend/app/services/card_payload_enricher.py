@@ -10,8 +10,8 @@ CHARC_ALIASES = {
     "gender": ["Пол"],
     "season": ["Сезон"],
     "fit": ["Тип посадки"],
-    "pants_model": ["Модель брюк", "Покрой"],
-    "closure": ["Вид застежки"],
+    "pants_model": ["Модель джинсов", "Модель брюк", "Покрой"],
+    "closure": ["Вид застежки", "Тип застежки"],
     "pockets": ["Тип карманов"],
     "features": ["Особенности модели"],
     "purpose": ["Назначение"],
@@ -170,8 +170,8 @@ class CardPayloadEnricher:
             "gender": self._first(attrs, ["Пол"]) or (analysis.gender if analysis else None) or (user_input.gender if user_input else None),
             "season": self._first(attrs, ["Сезон"]) or (analysis.season if analysis else None),
             "fit": self._first(attrs, ["Тип посадки"]) or self._fit_value(analysis.fit_type if analysis else None, all_text),
-            "pants_model": self._first(attrs, ["Модель брюк", "Покрой"]) or self._pants_model(all_text),
-            "closure": self._first(attrs, ["Вид застежки"]) or self._closure(all_text, subject_id=subject_id),
+            "pants_model": self._first(attrs, ["Модель джинсов", "Модель брюк", "Покрой"]) or self._pants_model(all_text),
+            "closure": self._first(attrs, ["Вид застежки", "Тип застежки"]) or self._closure(all_text, subject_id=subject_id),
             "pockets": self._first(attrs, ["Тип карманов"]) or self._pockets(all_text),
             "features": self._first(attrs, ["Особенности модели"]) or self._features(features),
             "purpose": self._first(attrs, ["Назначение", "purpose"]) or self._default_purpose(all_text),
@@ -224,12 +224,25 @@ class CardPayloadEnricher:
             charc_id = int(item["id"])
             if charc_id not in self._by_id or charc_id in seen:
                 continue
-            value = self._limit_value(charc_id, self._normalize_value(item.get("value")))
+            alias = self._alias_for_charc_id(charc_id)
+            value = (
+                self._normalize_dictionary_value(alias, item.get("value"))
+                if alias
+                else self._normalize_value(item.get("value"))
+            )
+            value = self._limit_value(charc_id, value)
             if value == []:
                 continue
             seen.add(charc_id)
             valid.append({"id": charc_id, "value": value})
         variant["characteristics"] = valid
+
+    def _alias_for_charc_id(self, charc_id: int) -> str | None:
+        charc_name = self._norm_name(self._by_id.get(charc_id, {}).get("name"))
+        for alias, names in CHARC_ALIASES.items():
+            if any(self._norm_name(name) == charc_name for name in names):
+                return alias
+        return None
 
     def _limit_value(self, charc_id: int, value: Any) -> Any:
         if not isinstance(value, list):
