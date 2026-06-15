@@ -18,6 +18,36 @@ function readCookie(name: string) {
     ?.split("=")[1] || null;
 }
 
+function formatApiError(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    const messages = value
+      .map((item) => {
+        if (!item || typeof item !== "object") return String(item || "");
+        const detail = item as { loc?: unknown[]; msg?: unknown; message?: unknown };
+        const location = Array.isArray(detail.loc)
+          ? detail.loc.filter((part) => part !== "body").join(".")
+          : "";
+        const message = String(detail.msg || detail.message || "").trim();
+        if (!message) return "";
+        return location ? `${location}: ${message}` : message;
+      })
+      .filter(Boolean);
+    return messages.join("; ");
+  }
+  if (value && typeof value === "object") {
+    const detail = value as { message?: unknown; msg?: unknown };
+    const message = detail.message || detail.msg;
+    if (typeof message === "string") return message;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "An error occurred";
+    }
+  }
+  return value == null ? "" : String(value);
+}
+
 async function fetchWithAuth(url: string, options: ApiOptions = {}) {
   if (!FINANCE_ENABLED && (url === "/finance" || url.startsWith("/finance/") || url.startsWith("/finance?"))) {
     throw new Error("Finance feature is currently unavailable.");
@@ -59,13 +89,14 @@ async function fetchWithAuth(url: string, options: ApiOptions = {}) {
       : fallbackText.slice(0, 500) || response.statusText || "An error occurred";
 
     try {
-      const errorData = JSON.parse(rawBody);
-      errorMsg =
+      const errorData = await response.json();
+      errorMsg = formatApiError(
         errorData?.error?.message ||
         errorData?.detail?.message ||
         errorData?.detail ||
         errorData?.message ||
-        errorMsg;
+        errorData
+      ) || "An error occurred";
       const details = errorData?.error?.details || errorData?.details;
       if (details) {
         const detailsText = typeof details === "string" ? details : JSON.stringify(details);

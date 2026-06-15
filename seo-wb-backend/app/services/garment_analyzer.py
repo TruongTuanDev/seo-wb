@@ -255,8 +255,29 @@ class GarmentAnalyzer:
                 "warnings": ["Gemini garment analysis failed, using local fallback analysis (Lỗi: " + str(last_exc)[:200] + ")"]
             }
 
-        # ENFORCEMENT RULES:
-        # 1. Prioritize selected product category and never silently change garment area.
+        return self.normalize_analysis(
+            garment_json,
+            front_image_bytes=front_image_bytes,
+            title=title,
+            description=description,
+            category=category,
+            gender=gender,
+        )
+
+    @staticmethod
+    def normalize_analysis(
+        garment_json: dict[str, Any],
+        *,
+        front_image_bytes: bytes,
+        title: str | None = None,
+        description: str | None = None,
+        category: str | None = None,
+        gender: str | None = None,
+    ) -> dict[str, Any]:
+        garment_json = dict(garment_json or {})
+        resolved_area = resolve_garment_area(category)
+
+        # User-selected category is authoritative and determines the garment area.
         if category:
             garment_json["category"] = category
         if resolved_area:

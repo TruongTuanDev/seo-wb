@@ -8,10 +8,10 @@ from app.services.subject_resolver import SubjectResolver
 class FakeWbClient:
     def __init__(self, subjects):
         self._subjects = subjects
-        self.calls = []
+        self.parent_ids = []
 
     async def get_subjects(self, parent_id=None, locale="ru"):
-        self.calls.append((parent_id, locale))
+        self.parent_ids.append(parent_id)
         return self._subjects
 
 
@@ -58,22 +58,40 @@ def test_ai_match_must_be_verified_against_real_wb_subjects():
 
 
 @pytest.mark.anyio
-async def test_resolve_subject_searches_all_subjects_and_keeps_product_terms_after_size(monkeypatch):
+async def test_resolver_uses_full_wb_subject_catalog_and_keeps_product_terms_after_size():
     subjects = [
-        {"subjectID": 1429, "subjectName": "\u0411\u043b\u0443\u0437\u043a\u0438-\u0431\u043e\u0434\u0438"},
-        {"subjectID": 256, "subjectName": "\u0422\u0440\u0443\u0441\u044b"},
+        {"subjectID": 71, "subjectName": "Брюки"},
+        {"subjectID": 1429, "subjectName": "Блузки-боди"},
+        {"subjectID": 219, "subjectName": "Футболки-поло"},
     ]
     wb_client = FakeWbClient(subjects)
     resolver = SubjectResolver(Settings(app_env="test", app_secret_key="test-secret-key"), wb_client)
-    monkeypatch.setattr(resolver, "_resolve_with_ai", lambda subjects_arg, source_text: None)
-    description = (
-        "combo bo 5 quan lot tre em, size S(86-92), M(122-128), 20x20x2, can nang 0.3, "
-        "\u0422\u0440\u0443\u0441\u044b \u041d\u0430\u0431\u043e\u0440 \u0442\u0440\u0443\u0441\u043e\u0432 "
-        "\u0434\u043b\u044f \u043c\u0430\u043b\u044c\u0447\u0438\u043a\u043e\u0432"
+    source = (
+        "Quần vải học sinh, size 25-30(40-50), 20x30x2, cân nặng 0.3, "
+        "mã 234, màu xanh đỏ tím vàng Брюки Брюки женские Текстиль "
+        "Женский С карманами На резинке Укороченные"
     )
 
-    subject = await resolver.resolve(ProductInput(category=description), ImageAnalysis(category=None))
+    subject = await resolver.resolve(ProductInput(note=source), ImageAnalysis())
+    normalized = SubjectResolver._normalize_text(SubjectResolver._strip_noise(source))
 
-    assert subject["subjectID"] == 256
-    assert wb_client.calls == [(None, "ru")]
-    assert "\u0442\u0440\u0443\u0441\u044b" in SubjectResolver._strip_noise(description)
+    assert wb_client.parent_ids == [None]
+    assert subject["subjectName"] == "Брюки"
+    assert "брюки" in normalized
+    assert "25-30" not in normalized
+    assert "20x30x2" not in normalized
+
+
+def test_top_candidates_use_same_exact_token_scoring_as_resolution():
+    subjects = [
+        {"subjectID": 71, "subjectName": "Брюки"},
+        {"subjectID": 1429, "subjectName": "Блузки-боди"},
+    ]
+
+    candidates = SubjectResolver._top_candidate_details(
+        subjects,
+        "Quần vải size 25-30 Брюки женские с карманами",
+    )
+
+    assert candidates[0]["subjectName"] == "Брюки"
+    assert candidates[0]["score"] == 1.0

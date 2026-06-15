@@ -1320,6 +1320,7 @@ export function CreateCardClient() {
            productCategory={subjectName}
            recommendations={recommendations}
            draftId={draftId || undefined}
+           productReferenceImages={images.slice(0, 2)}
          />
        </div>
 

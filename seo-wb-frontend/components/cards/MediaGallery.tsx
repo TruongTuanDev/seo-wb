@@ -188,13 +188,13 @@ export interface RecommendationPayload {
   recommendedBackground?: string;
 }
 
-const SUPPORTED_CATALOG_QUANTITIES = [3, 6, 9] as const;
+const SUPPORTED_CATALOG_QUANTITIES = [3, 6, 8] as const;
 const MAX_UPLOAD_IMAGE_BYTES = 10 * 1024 * 1024;
 
-function normalizeCatalogQuantity(quantity: number): 3 | 6 | 9 {
+function normalizeCatalogQuantity(quantity: number): 3 | 6 | 8 {
   if (quantity <= 3) return 3;
   if (quantity <= 6) return 6;
-  return 9;
+  return 8;
 }
 
 function toMediaUrl(url?: string | null) {
@@ -250,6 +250,7 @@ interface MediaGalleryProps {
   productCategory?: string;
   recommendations?: RecommendationPayload | null;
   draftId?: string | number;
+  productReferenceImages?: File[];
 }
 
 export function MediaGallery({
@@ -268,6 +269,7 @@ export function MediaGallery({
   productCategory = "",
   recommendations,
   draftId,
+  productReferenceImages = [],
 }: MediaGalleryProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [frontImage, setFrontImage] = useState<File | null>(null);
@@ -316,6 +318,8 @@ export function MediaGallery({
   const [isAnalyzingGarment, setIsAnalyzingGarment] = useState(false);
   const [showJsonPreview, setShowJsonPreview] = useState(false);
   const [imageActionLoading, setImageActionLoading] = useState<string | null>(null);
+  const effectiveFrontImage = frontImage || productReferenceImages[0] || null;
+  const effectiveBackImage = backImage || productReferenceImages[1] || null;
 
   useEffect(() => {
     let cancelled = false;
@@ -387,11 +391,9 @@ export function MediaGallery({
     setValidationError("");
     try {
       const formData = new FormData();
-      if (frontImage) {
-        formData.append("front_image", frontImage);
-      }
-      if (backImage) {
-        formData.append("back_image", backImage);
+      formData.append("front_image", effectiveFrontImage);
+      if (effectiveBackImage) {
+        formData.append("back_image", effectiveBackImage);
       }
       formData.append("category", productCategory);
       formData.append("title", variant?.title || "");
@@ -597,8 +599,8 @@ export function MediaGallery({
         return;
       }
       onGenerateImages({
-        frontImage: frontImage || undefined,
-        backImage: backImage || undefined,
+        frontImage: effectiveFrontImage,
+        backImage: effectiveBackImage || undefined,
         modelImage: customModelImage,
         modelId: "none",
         backgroundStyle,
@@ -614,8 +616,8 @@ export function MediaGallery({
         return;
       }
       onGenerateImages({
-        frontImage: frontImage || undefined,
-        backImage: backImage || undefined,
+        frontImage: effectiveFrontImage,
+        backImage: effectiveBackImage || undefined,
         modelId: "auto_russian_model",
         selectedModelGender: recommendations?.recommendedModelGender || productGenderText.toLowerCase(),
         selectedModelBodyType: recommendations?.recommendedBodyType || "",
@@ -641,9 +643,9 @@ export function MediaGallery({
         return;
       }
       onGenerateImages({
-        frontImage: frontImage || undefined,
-        backImage: backImage || undefined,
-        modelId: chosenModel.id,
+        frontImage: effectiveFrontImage,
+        backImage: effectiveBackImage || undefined,
+        modelId: selectedModelId,
         selectedModelImageUrl: chosenModel.frontImageUrl,
         selectedModelGender: chosenModel.gender,
         selectedModelBodyType: chosenModel.bodyType,
@@ -1020,7 +1022,7 @@ export function MediaGallery({
                     className="w-full"
                     onClick={handleAnalyzeGarment}
                     isLoading={isAnalyzingGarment || isFetchingGarment}
-                    disabled={!frontImage}
+                    disabled={!effectiveFrontImage}
                   >
                     Analyze Product Garment
                   </Button>
@@ -1029,15 +1031,8 @@ export function MediaGallery({
                 <div className="space-y-5 animate-in fade-in duration-300">
                   {/* Product Understanding */}
                   <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 space-y-3">
-                    <div className="flex items-center justify-between border-b border-zinc-200 pb-2">
+                    <div className="border-b border-zinc-200 pb-2">
                       <h3 className="text-sm font-bold text-zinc-800 uppercase tracking-wider">Product Understanding</h3>
-                      <button
-                        type="button"
-                        onClick={() => setGarmentJson(null)}
-                        className="text-xs text-zinc-500 hover:text-brand underline font-medium"
-                      >
-                        Re-analyze
-                      </button>
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                       <div>
@@ -1266,13 +1261,13 @@ export function MediaGallery({
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
                     <div className="font-semibold text-zinc-900">Pose Bundle Preview</div>
                     <div className="mt-1 leading-relaxed">
-                      {quantity === 3 && (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Back (waist-down)" : "Front, Side, Back")}
-                      {quantity === 6 && (effectiveBackImage 
-                        ? (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Back (waist-down), Lifestyle, Detail, Banner" : "Front, Side, Back, Lifestyle, Detail, Banner")
-                        : (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Lifestyle, Detail, Extra Detail, Banner" : "Front, Side, Lifestyle, Detail, Extra Detail, Banner"))}
-                      {quantity === 9 && (effectiveBackImage 
-                        ? (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Back (waist-down), Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Banner" : "Front, Side, Back, Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Banner")
-                        : (isLowerBodyProduct ? "Front (waist-down), Side (waist-down), Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Product Detail, Banner" : "Front, Side, Walking, Hand On Hip, Sitting, Fabric Detail, Logo Detail, Product Detail, Banner"))}
+                      {quantity === 3 && "Front, Lifestyle, Detail"}
+                      {quantity === 6 && (backImage 
+                        ? "Front, Side, Back, Lifestyle, Detail, Banner"
+                        : "Front, Side, Lifestyle, Detail, Extra Detail, Banner")}
+                      {quantity === 8 && (backImage
+                        ? "Front, Side, Back, Walking, Hand On Hip, Sitting, Fabric Detail, Banner"
+                        : "Front, Side, Walking, Hand On Hip, Sitting, Fabric Detail, Product Detail, Banner")}
                     </div>
                     <div className="mt-2 text-[11px] text-zinc-500">
                       {isLowerBodyProduct && (

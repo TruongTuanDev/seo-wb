@@ -94,32 +94,23 @@ class CardFlowService:
         )
         raw_payload = [group.model_dump(mode="json", exclude_none=True) for group in card_payload]
         await self._enrich_payload(raw_payload, int(subject["subjectID"]), user_input=user_input, analysis=analysis)
-        analysis_payload = analysis.model_dump()
-        analysis_payload["product_input"] = user_input.model_dump(mode="json", exclude_none=True)
-        if garment_json:
-            analysis_payload["garment_json"] = garment_json
-            analysis_payload["garment_area"] = garment_json.get("garment_area")
-        analysis_payload["attribute_confidence"] = attribute_confidence
-        analysis_payload["seo_keyword_plan"] = seo_keyword_plan
-        seo_score = self._apply_seo_validation(
-            raw_payload,
-            seo_keyword_plan=seo_keyword_plan,
-            attribute_confidence=attribute_confidence,
-            runtime_settings=runtime_settings,
-            subject=subject,
-            analysis=analysis,
-            user_input=user_input,
-            wb_characteristics=charcs,
+        first_variant = raw_payload[0]["variants"][0] if raw_payload and raw_payload[0].get("variants") else {}
+        garment_json = GarmentAnalyzer.normalize_analysis(
+            analysis.garment_json,
+            front_image_bytes=image_bytes[0],
+            title=str(first_variant.get("title") or analysis.product_name or ""),
+            description=str(first_variant.get("description") or ""),
+            category=str(subject.get("subjectName") or analysis.category or user_input.category or ""),
+            gender=analysis.gender or user_input.gender,
         )
-        analysis_payload["seo_score"] = seo_score
-        analysis_payload["seo_issues"] = seo_score.get("issues", [])
+        analysis.garment_json = garment_json
         draft = CardDraft(
             user_id=self._user.id,
             store_id=self._store.id,
             status="draft",
             subject_id=int(subject["subjectID"]),
             vendor_code=card_payload[0].variants[0].vendorCode if card_payload and card_payload[0].variants else None,
-            analysis=analysis_payload,
+            analysis=analysis.model_dump(),
             garment_json=garment_json,
             card_payload=raw_payload,
         )

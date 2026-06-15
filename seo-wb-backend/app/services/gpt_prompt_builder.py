@@ -28,28 +28,22 @@ POSES = {
 
 class GPTPromptBuilder:
     @staticmethod
-    def _pose_instruction(garment_json: dict[str, Any], pose: str, output_type: str = "catalog") -> str:
-        pose_key = pose.lower().strip()
-        default_pose = POSES.get(pose_key, POSES["front"])
-        garment_area = str(garment_json.get("garment_area") or "upper_body").lower().strip()
-        if garment_area != "lower_body" or output_type != "catalog":
-            return default_pose
-
-        lower_body_crops = {
-            "front": (
-                "Front-facing catalog pose. Keep the same front pose direction, but frame the image from approximately "
-                "the waist down so the waistband, hips, legs, silhouette, and hem of the lower-body garment stay dominant."
-            ),
-            "side_45": (
-                "45-degree side catalog pose. Keep the same side pose direction, but frame the image from approximately "
-                "the waist down so the waistband, hip line, side silhouette, leg line, and hem of the lower-body garment stay dominant."
-            ),
-            "back": (
-                "Back-facing catalog pose. Keep the same back pose direction, but frame the image from approximately "
-                "the waist down so the back waistband, seat, leg line, rear silhouette, and hem of the lower-body garment stay dominant."
-            ),
-        }
-        return lower_body_crops.get(pose_key, default_pose)
+    def product_focus_block(garment_json: dict[str, Any], product_focus: bool) -> str:
+        if not product_focus:
+            return ""
+        area = str(garment_json.get("garment_area") or "upper_body").lower().strip()
+        if area == "lower_body":
+            framing = "Frame primarily from the waist to the feet. The lower-body product must occupy most of the image."
+        elif area == "full_body":
+            framing = "Show the complete full-body garment from neckline to hem. The garment must occupy most of the image."
+        else:
+            framing = "Frame primarily from the shoulders to the hips. The upper-body product must occupy most of the image."
+        return (
+            "PRODUCT-FOCUSED CAMERA FRAMING:\n"
+            f"{framing}\n"
+            "Prioritize the product over the model's face and surrounding background.\n"
+            "Keep the complete product visible and do not crop any important product edge or detail."
+        )
 
     @staticmethod
     def _article_context_block(garment_json: dict[str, Any]) -> str:
@@ -141,6 +135,7 @@ The product itself must remain visually identical to the source.
         garment_json: dict[str, Any],
         style: str,
         pose: str,
+        product_focus: bool = False,
         strict_retry_fields: list[str] | None = None,
         has_model_reference: bool = True,
         selected_model_gender: str | None = None,
@@ -311,6 +306,7 @@ The product itself must remain visually identical to the source.
             color_lock_prompt,
             f"Style Setting:\n{style_desc}",
             f"Pose Instruction:\n{pose_desc}",
+            GPTPromptBuilder.product_focus_block(garment_json, product_focus),
             area_prompt,
             garment_info
         ]

@@ -223,19 +223,13 @@ class SubjectResolver:
     @staticmethod
     def _strip_noise(value: str) -> str:
         value = " ".join(str(value or "").casefold().split())
+        value = re.sub(r"\b(?:mã|ma|sku|article|vendor|арт(?:икул)?)\s*[:#-]?\s*[\w-]+", " ", value)
         value = re.sub(
-            r"\b(?:m\u00e3|ma|sku|article|vendor|\u0430\u0440\u0442(?:\u0438\u043a\u0443\u043b)?)"
-            r"\s*[:#-]?\s*[\w-]+",
+            r"\b(?:size|размер|kích thước|kich thuoc|cân nặng|can nang|weight)\b",
             " ",
             value,
         )
-        value = re.sub(
-            r"\b(?:size|\u0440\u0430\u0437\u043c\u0435\u0440|k\u00edch th\u01b0\u1edbc|kich thuoc|"
-            r"c\u00e2n n\u1eb7ng|can nang|weight)\b",
-            " ",
-            value,
-        )
-        value = re.sub(r"\b\d+(?:[x\u0445\u00d7]\d+){1,3}\b", " ", value)
+        value = re.sub(r"\b\d+(?:[xх×]\d+){1,3}\b", " ", value)
         value = re.sub(r"\b\d+(?:[.,]\d+)?(?:-\d+)?\b", " ", value)
         return re.sub(r"[,;/()]+", " ", value)
 

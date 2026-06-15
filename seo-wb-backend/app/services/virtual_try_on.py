@@ -415,6 +415,7 @@ def build_simplified_catalog_tasks(
         ttype = atask["type"]
         pose_name = atask["pose"]
         label = atask["label"]
+        product_focus = bool(atask.get("product_focus"))
         
         if ttype == "catalog":
             resolved = resolve_pose(pose_name)
@@ -426,6 +427,7 @@ def build_simplified_catalog_tasks(
                 "human_path": p_path,
                 "garment_url": g_url,
                 "label": label,
+                "product_focus": product_focus,
                 "style_key": "none"
             })
         elif ttype == "lifestyle":
@@ -437,6 +439,7 @@ def build_simplified_catalog_tasks(
                 "human_path": p_path,
                 "garment_url": front_data_uri,
                 "label": label,
+                "product_focus": product_focus,
                 "style_key": selected_style
             })
         elif ttype == "detail":
@@ -453,6 +456,7 @@ def build_simplified_catalog_tasks(
                 "pose": "detail",
                 "garment_url": front_data_uri,
                 "label": label,
+                "product_focus": product_focus,
                 "style_key": "none"
             })
             
@@ -777,6 +781,7 @@ class VirtualTryOnService:
                         "label": label,
                         "pose": task.get("pose", "front"),
                         "background_style": task.get("style_key", "none"),
+                        "product_focus": bool(task.get("product_focus")),
                         "model_id": model_id,
                         "garment_type": garment_type,
                         "face_similarity_score": face_sim_score

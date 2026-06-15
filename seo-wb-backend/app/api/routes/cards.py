@@ -196,7 +196,7 @@ def _normalize_catalog_bundle_quantity(quantity: int) -> int:
         return 5
     if quantity <= 6:
         return 6
-    return 6
+    return 8
 
 
 def _enforce_user_quota(user: User, quantity: int) -> None:

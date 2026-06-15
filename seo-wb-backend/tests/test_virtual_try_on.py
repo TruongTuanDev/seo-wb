@@ -593,8 +593,37 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
     assert [task["label"] for task in tasks_6_no_back] == ["Front", "Side", "Lifestyle", "Detail", "Extra Detail", "Banner"]
     assert tasks_6_no_back[4]["type"] == "front_detail" # mapped Extra Detail to front_detail
 
-    # 4. Test quantity 9 with back image
-    tasks_9_back = build_simplified_catalog_tasks(
+    # 4. Test quantity 8 with back image
+    tasks_8_back = build_simplified_catalog_tasks(
+        model_id="model_1",
+        quantity=8,
+        selected_style="studio",
+        has_back_image=True,
+        front_data_uri="front_uri",
+        back_data_uri="back_uri",
+        model_metadata={"availablePoses": ["front", "side_45", "back", "walking", "hand_on_hip", "sitting"]}
+    )
+    assert len(tasks_8_back) == 8
+    assert [task["label"] for task in tasks_8_back] == ["Front", "Side", "Back", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Banner"]
+    assert tasks_8_back[2]["pose"] == "back"
+    assert sum(bool(task["product_focus"]) for task in tasks_8_back) == 4
+
+    # 5. Test quantity 8 without back image (uses Product Detail)
+    tasks_8_no_back = build_simplified_catalog_tasks(
+        model_id="model_1",
+        quantity=8,
+        selected_style="studio",
+        has_back_image=False,
+        front_data_uri="front_uri",
+        back_data_uri=None,
+        model_metadata={"availablePoses": ["front", "side_45", "walking", "hand_on_hip", "sitting"]}
+    )
+    assert len(tasks_8_no_back) == 8
+    assert [task["label"] for task in tasks_8_no_back] == ["Front", "Side", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Product Detail", "Banner"]
+    assert sum(bool(task["product_focus"]) for task in tasks_8_no_back) == 4
+
+    # Legacy quantity 9 remains compatible and resolves to the 8-image bundle.
+    tasks_legacy_9 = build_simplified_catalog_tasks(
         model_id="model_1",
         quantity=9,
         selected_style="studio",
@@ -603,22 +632,7 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
         back_data_uri="back_uri",
         model_metadata={"availablePoses": ["front", "side_45", "back", "walking", "hand_on_hip", "sitting"]}
     )
-    assert len(tasks_9_back) == 9
-    assert [task["label"] for task in tasks_9_back] == ["Front", "Side", "Back", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Logo Detail", "Banner"]
-    assert tasks_9_back[2]["pose"] == "back"
-
-    # 5. Test quantity 9 without back image (replaces back with Product Detail)
-    tasks_9_no_back = build_simplified_catalog_tasks(
-        model_id="model_1",
-        quantity=9,
-        selected_style="studio",
-        has_back_image=False,
-        front_data_uri="front_uri",
-        back_data_uri=None,
-        model_metadata={"availablePoses": ["front", "side_45", "walking", "hand_on_hip", "sitting"]}
-    )
-    assert len(tasks_9_no_back) == 9
-    assert [task["label"] for task in tasks_9_no_back] == ["Front", "Side", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Logo Detail", "Product Detail", "Banner"]
+    assert tasks_legacy_9 == tasks_8_back
 
     # 6. Test pose fallbacks (model lacking side_45 and walking)
     tasks_fallback = build_simplified_catalog_tasks(
