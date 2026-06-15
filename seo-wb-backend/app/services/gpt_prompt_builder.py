@@ -22,7 +22,15 @@ POSES = {
     "walking": "Natural walking fashion catalog pose. One foot stepping forward, full garment visible.",
     "back": "Back-facing catalog pose. Show the back of the garment clearly. Use only if product back image exists.",
     "hand_on_hip": "One hand on hip, fashion catalog stance, full garment visible.",
-    "sitting": "Sitting on a simple white cube, professional catalog pose, garment clearly visible."
+    "sitting": "Sitting on a simple white cube, professional catalog pose, garment clearly visible.",
+    "banner_focus": "Product-focused marketplace banner crop. Clean ecommerce composition with the product as the dominant subject."
+}
+
+FOCUSED_POSES = {
+    "front": "Front-facing product-focused crop. Keep the product straight to camera and let the product dominate the frame.",
+    "side_45": "45-degree product-focused crop. Keep the product visible from the side angle and let the product dominate the frame.",
+    "back": "Back-facing product-focused crop. Show the back of the product clearly and let the product dominate the frame.",
+    "banner_focus": "Product-focused marketplace banner crop. Use a clean composition where the product dominates the frame."
 }
 
 
@@ -170,7 +178,13 @@ The product itself must remain visually identical to the source.
 
         # Standardize pose
         pose_key = pose.lower().strip()
-        pose_desc = POSES.get(pose_key, POSES["front"])
+        pose_desc = (
+            FOCUSED_POSES.get(pose_key)
+            if product_focus
+            else POSES.get(pose_key, POSES["front"])
+        )
+        if not pose_desc:
+            pose_desc = POSES.get(pose_key, POSES["front"])
 
         # Base Prompt emphasizing real photography
         if has_model_reference:
@@ -359,7 +373,8 @@ The product itself must remain visually identical to the source.
         style: str,
         pose: str,
         has_model_reference: bool = True,
-        selected_model_gender: str | None = None
+        selected_model_gender: str | None = None,
+        product_focus: bool = False,
     ) -> str:
         # Standardize style/pose description
         style_key = style.lower().strip()
@@ -367,7 +382,13 @@ The product itself must remain visually identical to the source.
         style_desc = STYLE_OPTIONS.get(style_key, STYLE_OPTIONS["studio"])
 
         pose_key = pose.lower().strip()
-        pose_desc = POSES.get(pose_key, POSES["front"])
+        pose_desc = (
+            FOCUSED_POSES.get(pose_key)
+            if product_focus
+            else POSES.get(pose_key, POSES["front"])
+        )
+        if not pose_desc:
+            pose_desc = POSES.get(pose_key, POSES["front"])
 
         product_type = garment_json.get("product_type") or "garment"
         category = garment_json.get("category") or "garment"

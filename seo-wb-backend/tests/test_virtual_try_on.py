@@ -561,8 +561,10 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
         model_metadata={"availablePoses": ["front", "side_45", "walking"]}
     )
     assert len(tasks_3) == 3
-    assert tasks_3[0]["label"] == "Front"
-    assert tasks_3[1]["label"] == "Lifestyle"
+    assert tasks_3[0]["label"] == "Crop"
+    assert tasks_3[0]["product_focus"] is True
+    assert tasks_3[1]["label"] == "Front"
+    assert tasks_3[1]["product_focus"] is False
     assert tasks_3[2]["label"] == "Detail"
     
     # 2. Test quantity 6 with back image
@@ -608,6 +610,7 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
     assert len(tasks_8_back) == 8
     assert [task["label"] for task in tasks_8_back] == ["Front", "Side", "Back", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Banner"]
     assert tasks_8_back[2]["pose"] == "back"
+    assert tasks_8_back[7]["pose"] == "banner_focus"
     assert sum(bool(task["product_focus"]) for task in tasks_8_back) == 4
     assert {task["label"] for task in tasks_8_back if task["product_focus"]} == {"Front", "Side", "Back", "Banner"}
 
@@ -623,6 +626,7 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
     )
     assert len(tasks_8_no_back) == 8
     assert [task["label"] for task in tasks_8_no_back] == ["Front", "Side", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Product Detail", "Banner"]
+    assert tasks_8_no_back[7]["pose"] == "banner_focus"
     assert sum(bool(task["product_focus"]) for task in tasks_8_no_back) == 4
     assert {task["label"] for task in tasks_8_no_back if task["product_focus"]} == {"Front", "Side", "Product Detail", "Banner"}
 

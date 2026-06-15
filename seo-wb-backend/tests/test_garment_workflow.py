@@ -106,6 +106,8 @@ def test_gpt_prompt_builder():
     assert "PRODUCT-FOCUSED CAMERA FRAMING" in focused_prompt
     assert "Frame primarily from the waist to the feet." in focused_prompt
     assert "The lower-body product must occupy most of the image." in focused_prompt
+    assert "Front-facing product-focused crop" in focused_prompt
+    assert "Front-facing full-body catalog pose" not in focused_prompt
 
     # Retry Prompt (Strict Garment Preservation Mode)
     strict_prompt = GPTPromptBuilder.build_prompt(
@@ -179,9 +181,10 @@ def test_garment_validator_failures():
 def test_build_tasks_quantity_rules():
     tasks_3 = GPTImageCatalogService.build_tasks(3, has_back_image=True)
     assert len(tasks_3) == 3
-    assert [task["label"] for task in tasks_3] == ["Front", "Lifestyle", "Detail"]
+    assert [task["label"] for task in tasks_3] == ["Crop", "Front", "Detail"]
     assert sum(bool(task["product_focus"]) for task in tasks_3) == 1
-    assert {task["label"] for task in tasks_3 if task["product_focus"]} == {"Front"}
+    assert {task["label"] for task in tasks_3 if task["product_focus"]} == {"Crop"}
+    assert not next(task for task in tasks_3 if task["label"] == "Front")["product_focus"]
 
     tasks_6_back = GPTImageCatalogService.build_tasks(6, has_back_image=True)
     assert len(tasks_6_back) == 6
@@ -198,12 +201,14 @@ def test_build_tasks_quantity_rules():
     tasks_8_back = GPTImageCatalogService.build_tasks(8, has_back_image=True)
     assert len(tasks_8_back) == 8
     assert [task["label"] for task in tasks_8_back] == ["Front", "Side", "Back", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Banner"]
+    assert next(task for task in tasks_8_back if task["label"] == "Banner")["pose"] == "banner_focus"
     assert sum(bool(task["product_focus"]) for task in tasks_8_back) == 4
     assert {task["label"] for task in tasks_8_back if task["product_focus"]} == {"Front", "Side", "Back", "Banner"}
 
     tasks_8_no_back = GPTImageCatalogService.build_tasks(8, has_back_image=False)
     assert len(tasks_8_no_back) == 8
     assert [task["label"] for task in tasks_8_no_back] == ["Front", "Side", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Product Detail", "Banner"]
+    assert next(task for task in tasks_8_no_back if task["label"] == "Banner")["pose"] == "banner_focus"
     assert sum(bool(task["product_focus"]) for task in tasks_8_no_back) == 4
     assert {task["label"] for task in tasks_8_no_back if task["product_focus"]} == {"Front", "Side", "Product Detail", "Banner"}
 

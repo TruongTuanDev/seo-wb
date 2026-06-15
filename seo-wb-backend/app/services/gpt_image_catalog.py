@@ -131,8 +131,8 @@ def _build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str,
 
     if quantity == 3:
         return [
+            {"pose": "front", "type": "catalog", "label": "Crop", "output_type": "catalog", "validation_pose": "front"},
             {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
-            {"pose": "walking", "type": "lifestyle", "label": "Lifestyle", "output_type": "lifestyle", "validation_pose": None},
             {"pose": "detail", "type": "detail", "label": "Detail", "output_type": "detail", "validation_pose": "detail"},
         ]
     elif quantity == 6:
@@ -164,7 +164,7 @@ def _build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str,
                 {"pose": "hand_on_hip", "type": "catalog", "label": "Hand On Hip", "output_type": "catalog", "validation_pose": "hand_on_hip"},
                 {"pose": "sitting", "type": "lifestyle", "label": "Sitting", "output_type": "lifestyle", "validation_pose": "sitting"},
                 {"pose": "fabric_detail", "type": "detail", "label": "Fabric Detail", "output_type": "detail", "validation_pose": "fabric_detail"},
-                {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
+                {"pose": "banner_focus", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
             ]
         else:
             return [
@@ -175,14 +175,14 @@ def _build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str,
                 {"pose": "sitting", "type": "lifestyle", "label": "Sitting", "output_type": "lifestyle", "validation_pose": "sitting"},
                 {"pose": "fabric_detail", "type": "detail", "label": "Fabric Detail", "output_type": "detail", "validation_pose": "fabric_detail"},
                 {"pose": "product_detail", "type": "detail", "label": "Product Detail", "output_type": "detail", "validation_pose": "product_detail"},
-                {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
+                {"pose": "banner_focus", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
             ]
 
 
 def build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str, Any]]:
     tasks = _build_catalog_bundle(quantity, has_back_image)
     focused_labels_by_size = {
-        3: {"Front"},
+        3: {"Crop"},
         6: {"Front", "Side", "Back" if has_back_image else "Extra Detail"},
         8: {"Front", "Side", "Banner", "Back" if has_back_image else "Product Detail"},
     }
@@ -284,6 +284,8 @@ class GPTImageCatalogService:
                 
                 if label == "banner":
                     return 8
+                if label == "crop":
+                    return 1
                 if "front" in pose:
                     return 1
                 if "side" in pose:
@@ -605,7 +607,8 @@ class GPTImageCatalogService:
                             style=style,
                             pose=pose,
                             has_model_reference=has_model_image,
-                            selected_model_gender=metadata.get("selected_model_gender")
+                            selected_model_gender=metadata.get("selected_model_gender"),
+                            product_focus=bool(task.get("product_focus")),
                         )
                     else:
                         if garment_json.get("complex_product_mode"):
