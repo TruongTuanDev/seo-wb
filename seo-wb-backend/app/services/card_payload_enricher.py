@@ -83,6 +83,30 @@ class CardPayloadEnricher:
             if value:
                 self._upsert_by_alias(variant, alias, value, overwrite=alias in {"composition", "gender", "season", "fit"})
         self._conform_characteristics(variant)
+        self._sync_vendor_code_color(variant)
+
+    def _sync_vendor_code_color(self, variant: dict[str, Any]) -> None:
+        vendor_code = str(variant.get("vendorCode") or "").strip()
+        color_charc = self._find_charc("color")
+        if not vendor_code or not color_charc:
+            return
+
+        color_id = int(color_charc["charcID"])
+        color_value = next(
+            (
+                item.get("value")
+                for item in variant.get("characteristics") or []
+                if isinstance(item, dict) and int(item.get("id") or 0) == color_id
+            ),
+            None,
+        )
+        values = color_value if isinstance(color_value, list) else [color_value]
+        color = str(next((value for value in values if str(value or "").strip()), "")).strip()
+        if not color:
+            return
+
+        base_code = vendor_code.rsplit("/", 1)[0] if "/" in vendor_code else vendor_code
+        variant["vendorCode"] = f"{base_code}/{color}"
 
     def _infer_values(
         self,

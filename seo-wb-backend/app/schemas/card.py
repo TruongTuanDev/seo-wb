@@ -121,6 +121,10 @@ class DraftUpdateRequest(BaseModel):
     card_payload: list[CardUploadGroup]
 
 
+class ImportWbCardRequest(BaseModel):
+    nm_id: int = Field(gt=0)
+
+
 class PushDraftRequest(BaseModel):
     card_payload: list[CardUploadGroup] | None = None
     dry_run: bool = False

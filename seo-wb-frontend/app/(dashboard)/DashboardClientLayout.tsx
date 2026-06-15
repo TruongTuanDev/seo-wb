@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { BarChart2, Box, Check, ChevronDown, List, ListChecks, LogOut, Plus, PlusSquare, Search, Settings, X } from "lucide-react";
+import { Box, Check, ChevronDown, List, ListChecks, LogOut, Plus, PlusSquare, Search, Settings, X } from "lucide-react";
 import { CreateStoreModal } from "@/components/dashboard/CreateStoreModal";
 import { StoreSettingsModal } from "@/components/dashboard/StoreSettingsModal";
 import { PageTransition } from "@/components/ui/PageTransition";
@@ -65,12 +65,6 @@ export function DashboardClientLayout({ children }: { children: React.ReactNode 
   const productMenuItems = [
     { name: t("list"), href: "/cards", icon: List },
     { name: t("create"), href: "/cards/new", icon: PlusSquare },
-  ];
-
-  const financeMenuItems = [
-    { name: t("financeDashboard"), href: "/finance", icon: BarChart2 },
-    { name: t("productCosts"), href: "/finance/product-settings", icon: Settings },
-    { name: t("settings"), href: "/finance/settings", icon: Settings },
   ];
 
   const switchStore = (storeId: number) => {
@@ -151,29 +145,6 @@ export function DashboardClientLayout({ children }: { children: React.ReactNode 
                 </div>
               </div>
 
-              {/* Finance */}
-              <div className="group relative">
-                <Link
-                  href="/finance"
-                  className={cn(
-                    "relative inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 active:scale-[0.98]",
-                    pathname.startsWith("/finance")
-                      ? "bg-zinc-100 text-zinc-950 before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-brand"
-                      : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950"
-                  )}
-                >
-                  <BarChart2 size={17} />
-                  {t("finance")}
-                  <ChevronDown size={13} className="transition-transform duration-200 group-hover:rotate-180" />
-                </Link>
-                <div className="invisible absolute left-0 top-full z-50 mt-2 w-48 translate-y-1 rounded-xl border border-zinc-200 bg-white p-1.5 opacity-0 shadow-soft-xl transition-all duration-200 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
-                  {financeMenuItems.map(({ name, href, icon: Icon }) => (
-                    <Link key={name} href={href} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-950">
-                      <Icon size={15} />{name}
-                    </Link>
-                  ))}
-                </div>
-              </div>
             </nav>
           </div>
 
@@ -344,16 +315,6 @@ export function DashboardClientLayout({ children }: { children: React.ReactNode 
               <Icon size={16} />{name}
             </Link>
           ))}
-          <div className="mx-1 w-px shrink-0 bg-zinc-200" />
-          <Link
-            href="/finance"
-            className={cn(
-              "inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 active:scale-[0.98]",
-              pathname.startsWith("/finance") ? "bg-zinc-100 text-zinc-950" : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950"
-            )}
-          >
-            <BarChart2 size={16} />{t("finance")}
-          </Link>
         </nav>
       </header>
 

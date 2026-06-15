@@ -19,6 +19,10 @@ class Settings(BaseSettings):
 
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
+    gemini_fallback_model: str | None = "gemini-2.5-flash-lite"
+    gemini_analysis_retry_attempts: int = 3
+    gemini_retry_backoff_seconds: float = 2.0
+    gemini_retry_max_backoff_seconds: float = 12.0
 
     openai_api_key: str | None = None
     openai_card_model: str | None = None

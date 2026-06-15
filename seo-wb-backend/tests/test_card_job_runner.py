@@ -36,6 +36,13 @@ class FakeFlow:
         return self._response
 
 
+class FakeLegacyVendorFlow(FakeFlow):
+    async def get_cards_by_text(self, text_search, limit=100, with_photo=-1):
+        if text_search.casefold() == "234/черный":
+            return {"cards": [{"nmID": 1152698127, "vendorCode": "234/Черный"}]}
+        return {"cards": []}
+
+
 def test_format_job_error_preserves_app_error_details():
     exc = AppError(
         "wildberries_request_failed",
@@ -49,6 +56,30 @@ def test_format_job_error_preserves_app_error_details():
     assert "wildberries_request_failed" in message
     assert "status_code" in message
     assert "Invalid characteristic value" in message
+
+
+def test_vendor_code_aliases_include_russian_color_for_legacy_latin_suffix():
+    variant = _group("234/CHERNYI").variants[0]
+    variant.characteristics[0].value = ["черный"]
+
+    aliases = CardJobRunner._vendor_code_aliases(variant)
+
+    assert aliases == ["234/CHERNYI", "234/черный"]
+
+
+@pytest.mark.anyio
+async def test_wait_for_nm_ids_resolves_wb_normalized_russian_vendor_code(monkeypatch):
+    variant_group = _group("234/CHERNYI")
+    variant_group.variants[0].characteristics[0].value = ["черный"]
+    runner = CardJobRunner(Settings(app_env="test", app_secret_key="test-secret-key"))
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("app.services.card_job_runner.asyncio.sleep", no_sleep)
+    nm_map = await runner._wait_for_nm_ids(FakeLegacyVendorFlow({"data": {"items": []}}), [variant_group])
+
+    assert nm_map == {"234/CHERNYI": 1152698127}
 
 
 @pytest.mark.anyio

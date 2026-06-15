@@ -1,4 +1,6 @@
 import json
+import logging
+import random
 import time
 from io import BytesIO
 
@@ -11,6 +13,9 @@ from app.core.errors import AppError
 from app.schemas.card import ImageAnalysis, ProductInput
 from app.services.garment_analyzer import GARMENT_SCHEMA, GarmentAnalyzer
 from app.services.product_intent_parser import ProductIntentParser
+
+
+logger = logging.getLogger(__name__)
 
 
 ANALYSIS_SCHEMA = {
@@ -76,6 +81,10 @@ class GeminiAnalyzer:
         if not settings.gemini_api_key:
             raise AppError("missing_gemini_key", "GEMINI_API_KEY is missing.", 500)
         self._model = settings.gemini_model
+        self._fallback_model = settings.gemini_fallback_model
+        self._retry_attempts = max(1, settings.gemini_analysis_retry_attempts)
+        self._retry_backoff = max(0.1, settings.gemini_retry_backoff_seconds)
+        self._retry_max_backoff = max(self._retry_backoff, settings.gemini_retry_max_backoff_seconds)
         self._client = genai.Client(api_key=settings.gemini_api_key)
 
     def analyze(self, image_bytes_list: list[bytes], user_input: ProductInput) -> ImageAnalysis:
@@ -84,30 +93,14 @@ class GeminiAnalyzer:
 
         images = [self._load_image(image_bytes) for image_bytes in image_bytes_list]
         prompt = self._build_prompt(user_input)
-        last_exc: Exception | None = None
-        for attempt in range(1, 4):
-            try:
-                response = self._client.models.generate_content(
-                    model=self._model,
-                    contents=[prompt, *images],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=ANALYSIS_SCHEMA,
-                        temperature=0.1,
-                    ),
-                )
-                break
-            except Exception as exc:
-                last_exc = exc
-                if attempt < 3:
-                    time.sleep(1.5 * attempt)
-        else:
-            raise AppError("gemini_failed", "Gemini image analysis failed.", 502, {"reason": str(last_exc)[:500]}) from last_exc
+        response, used_model = self._generate_with_failover(prompt, images)
 
         try:
             raw = json.loads(response.text or "{}")
             raw = self._normalize_analysis(raw, image_bytes_list[0], user_input)
             raw["source_image_count"] = len(images)
+            raw["garment_json"]["analysis_model"] = used_model
+            raw["garment_json"]["analysis_fallback_used"] = used_model != self._model
             from app.services.studio_recommender import recommend_for_product
             raw["recommendations"] = recommend_for_product(raw, user_input)
             return ImageAnalysis.model_validate(raw)
@@ -118,6 +111,69 @@ class GeminiAnalyzer:
                 502,
                 {"raw": (response.text or "")[:1000]},
             ) from exc
+
+    def _generate_with_failover(self, prompt: str, images: list[Image.Image]):
+        models = [self._model]
+        if self._fallback_model and self._fallback_model not in models:
+            models.append(self._fallback_model)
+
+        last_exc: Exception | None = None
+        for model_index, model in enumerate(models):
+            for attempt in range(self._retry_attempts):
+                try:
+                    response = self._client.models.generate_content(
+                        model=model,
+                        contents=[prompt, *images],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=ANALYSIS_SCHEMA,
+                            temperature=0.1,
+                        ),
+                    )
+                    if model_index:
+                        logger.warning("Gemini analysis recovered with fallback model %s.", model)
+                    return response, model
+                except Exception as exc:
+                    last_exc = exc
+                    retryable = self._is_retryable_error(exc)
+                    has_next_attempt = attempt < self._retry_attempts - 1
+                    logger.warning(
+                        "Gemini analysis failed. model=%s attempt=%s/%s retryable=%s error=%s",
+                        model,
+                        attempt + 1,
+                        self._retry_attempts,
+                        retryable,
+                        str(exc)[:300],
+                    )
+                    if not retryable or not has_next_attempt:
+                        break
+                    delay = min(self._retry_backoff * (2**attempt), self._retry_max_backoff)
+                    time.sleep(delay + random.uniform(0, min(0.75, delay * 0.25)))
+
+        raise AppError(
+            "image_analysis_temporarily_unavailable",
+            "AI image analysis is temporarily busy. The system already retried automatically; please try again shortly.",
+            503,
+        ) from last_exc
+
+    @staticmethod
+    def _is_retryable_error(exc: Exception) -> bool:
+        text = str(exc).casefold()
+        transient_markers = (
+            "429",
+            "500",
+            "502",
+            "503",
+            "504",
+            "resource_exhausted",
+            "unavailable",
+            "high demand",
+            "temporarily",
+            "timeout",
+            "timed out",
+            "connection",
+        )
+        return any(marker in text for marker in transient_markers)
 
     @staticmethod
     def _normalize_analysis(raw: dict, front_image_bytes: bytes, user_input: ProductInput) -> dict:

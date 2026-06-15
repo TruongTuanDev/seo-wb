@@ -206,6 +206,14 @@ function findCharacteristicValue(characteristics: Characteristic[], names: strin
   return item ? valueText(item.value) : "";
 }
 
+function vendorCodeForColor(vendorCode: string, color: string) {
+  const cleanCode = vendorCode.trim();
+  const cleanColor = color.split(";")[0]?.trim();
+  if (!cleanCode || !cleanColor) return cleanCode;
+  const baseCode = cleanCode.includes("/") ? cleanCode.slice(0, cleanCode.lastIndexOf("/")) : cleanCode;
+  return `${baseCode}/${cleanColor}`;
+}
+
 export function CreateCardClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -481,7 +489,11 @@ export function CreateCardClient() {
 
   const setActiveColor = (nextColor: string) => {
     const nextCharcs = upsertCharacteristicByName(activeVariant?.characteristics || [], charcSchema, ["Цвет", "color"], nextColor);
-    updateActiveVariant({ color: nextColor, characteristics: nextCharcs });
+    updateActiveVariant({
+      color: nextColor,
+      vendorCode: vendorCodeForColor(activeVariant?.vendorCode || "", nextColor),
+      characteristics: nextCharcs,
+    });
   };
 
   const getCharacteristicValue = (names: string[]) => {
@@ -672,6 +684,7 @@ export function CreateCardClient() {
           value: charcValueText(item.value),
         }));
       const generatedCharcs = mapGeneratedCharcs(generatedVariant);
+      const generatedVariantColor = findCharacteristicValue(generatedCharcs, ["Цвет", "color"]);
       const enrichedCharcs = [
         ["Состав", "composition", "material"],
         ["Цвет", "color"],
@@ -680,7 +693,7 @@ export function CreateCardClient() {
         const value = names[0] === "Состав"
           ? (response.analysis?.material || response.analysis?.attributes?.["Состав"])
           : names[0] === "Цвет"
-            ? (response.analysis?.color || response.analysis?.attributes?.["Цвет"])
+            ? (generatedVariantColor || response.analysis?.color || response.analysis?.attributes?.["Цвет"])
             : (response.analysis?.gender || response.analysis?.attributes?.["Пол"] || gender);
         return upsertCharacteristicByName(list, charcSchema, names, value);
       }, generatedCharcs as Characteristic[]);

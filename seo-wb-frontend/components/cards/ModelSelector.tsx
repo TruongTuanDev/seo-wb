@@ -30,7 +30,7 @@ export function ModelSelector({
           Select Model <span className="text-brand">*</span>
         </label>
         <span className="text-[11px] text-zinc-500">
-          Scroll down to see all 10 models
+          {models.length} model{models.length === 1 ? "" : "s"}
         </span>
       </div>
 

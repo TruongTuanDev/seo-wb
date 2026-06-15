@@ -30,3 +30,21 @@ def test_enricher_drops_unknown_optional_dictionary_value():
     enricher.enrich_payload(payload, subject_id=180, analysis=ImageAnalysis(season="unknown-season"))
 
     assert payload["variants"][0]["characteristics"] == []
+
+
+def test_enricher_synchronizes_vendor_code_with_final_color():
+    payload = {
+        "variants": [
+            {
+                "vendorCode": "345/Синий",
+                "characteristics": [{"id": 14177449, "value": ["Черный"]}],
+            }
+        ]
+    }
+    enricher = CardPayloadEnricher(
+        [{"charcID": 14177449, "name": "Цвет", "maxCount": 5}],
+    )
+
+    enricher.enrich_payload(payload, subject_id=11)
+
+    assert payload["variants"][0]["vendorCode"] == "345/Черный"

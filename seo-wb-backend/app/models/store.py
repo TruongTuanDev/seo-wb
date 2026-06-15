@@ -22,4 +22,5 @@ class Store(Base):
 
     user = relationship("User", back_populates="stores")
     drafts = relationship("CardDraft", back_populates="store", cascade="all, delete-orphan")
+    shop_models = relationship("ShopModel", back_populates="store", cascade="all, delete-orphan")
     seller = relationship("Seller", back_populates="store", uselist=False, cascade="all, delete-orphan")

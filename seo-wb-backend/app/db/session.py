@@ -51,6 +51,7 @@ def init_db() -> None:
         WbFinanceSyncState,
     )
     from app.models.seller import Seller
+    from app.models.shop_model import ShopModel
     from app.models.store import Store
     from app.models.user import User
     from app.models.wb_product import WbProduct, WbProductSyncState
@@ -71,6 +72,7 @@ def init_db() -> None:
         ProductFinanceSetting,
         SellerFinanceAutomationState,
         Seller,
+        ShopModel,
         SellerFinanceSettings,
         Store,
         SubscriptionPlan,

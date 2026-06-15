@@ -9,6 +9,8 @@ import { Modal } from "@/components/ui/Modal";
 import { ModelSelector } from "@/components/cards/ModelSelector";
 import { API_BASE, api } from "@/lib/api";
 import { fetchRuntimeAiStudioSettings, fetchRuntimeModelTemplates, RuntimeModelTemplate } from "@/lib/modelTemplates";
+import { fetchShopModels, type ShopModel } from "@/lib/shopModels";
+import { useStore } from "@/contexts/StoreContext";
 
 export const CATEGORY_TO_GARMENT_TYPE: Record<string, string> = {
   "shirt": "upper_body",
@@ -251,6 +253,7 @@ export function MediaGallery({
   draftId,
   productReferenceImages = [],
 }: MediaGalleryProps) {
+  const { currentStoreId } = useStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [frontImage, setFrontImage] = useState<File | null>(null);
   const [backImage, setBackImage] = useState<File | null>(null);
@@ -260,9 +263,10 @@ export function MediaGallery({
   const [backgroundStyle, setBackgroundStyle] = useState<string>("studio");
   const [selectedImageModel, setSelectedImageModel] = useState<string>("gpt-image-2");
   const [customModelImage, setCustomModelImage] = useState<File | null>(null);
-  const [modelSource, setModelSource] = useState<"template" | "upload" | "ai">("template");
+  const [modelSource, setModelSource] = useState<"my" | "system" | "upload">("my");
   const [isExporting, setIsExporting] = useState<Record<string, boolean>>({});
   const [models, setModels] = useState<RuntimeModelTemplate[]>([]);
+  const [shopModels, setShopModels] = useState<ShopModel[]>([]);
   const [modelsLoadError, setModelsLoadError] = useState("");
 
   const [garmentJson, setGarmentJson] = useState<GarmentJsonPayload | null>(null);
@@ -282,7 +286,6 @@ export function MediaGallery({
         startTransition(() => {
           setModelsLoadError("");
           setModels(items);
-          setSelectedModelId((current) => current || items[0]?.id || "");
         });
       })
       .catch((err: unknown) => {
@@ -307,6 +310,31 @@ export function MediaGallery({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentStoreId) {
+      startTransition(() => setShopModels([]));
+      return;
+    }
+    let cancelled = false;
+    fetchShopModels(currentStoreId)
+      .then((items) => {
+        if (cancelled) return;
+        startTransition(() => {
+          setShopModels(items);
+          if (modelSource === "my") {
+            setSelectedModelId(items[0]?.id || "");
+          }
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        startTransition(() => setShopModels([]));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentStoreId, modelSource]);
 
   useEffect(() => {
     if (!isModalOpen || !draftId) return;
@@ -441,7 +469,8 @@ export function MediaGallery({
   const isFemaleProd = productGender.includes("жен") || productGender.includes("fem") || productGender.includes("girl") || productGender.includes("woman");
   const isMaleProd = productGender.includes("муж") || productGender.includes("маск") || productGender.includes("boy") || productGender.includes("man");
 
-  const selectedModel = models.find((m) => m.id === selectedModelId);
+  const activeModels = modelSource === "my" ? shopModels : models;
+  const selectedModel = activeModels.find((model) => model.id === selectedModelId);
   const isGenderMismatch = selectedModel && (
     (selectedModel.gender.toLowerCase() === "female" && isMaleProd) ||
     (selectedModel.gender.toLowerCase() === "male" && isFemaleProd)
@@ -544,24 +573,6 @@ export function MediaGallery({
         imageModel: selectedImageModel,
         autoGenerateModel: false,
       });
-    } else if (modelSource === "ai") {
-      if (!validateImage(effectiveFrontImage) || (effectiveBackImage && !validateImage(effectiveBackImage))) {
-        setValidationError("Only JPG, PNG, or WEBP images are supported.");
-        return;
-      }
-      onGenerateImages({
-        frontImage: effectiveFrontImage,
-        backImage: effectiveBackImage || undefined,
-        modelId: "auto_russian_model",
-        selectedModelGender: recommendations?.recommendedModelGender || productGenderText.toLowerCase(),
-        selectedModelBodyType: recommendations?.recommendedBodyType || "",
-        backgroundStyle,
-        quantity,
-        jobType: "gpt_image_openai",
-        productCategory,
-        imageModel: selectedImageModel,
-        autoGenerateModel: true,
-      });
     } else {
       if (!selectedModelId || selectedModelId === "none") {
         setValidationError("Please select a real model reference before generating catalog images.");
@@ -571,7 +582,7 @@ export function MediaGallery({
         setValidationError("Only JPG, PNG, or WEBP images are supported.");
         return;
       }
-      const chosenModel = models.find((m) => m.id === selectedModelId);
+      const chosenModel = activeModels.find((model) => model.id === selectedModelId);
       if (!chosenModel) {
         setValidationError("Please select a real model reference before generating catalog images.");
         return;
@@ -925,20 +936,37 @@ export function MediaGallery({
                     </div>
                   )}
 
-                  {/* Model Source Selector (Templates vs Upload) */}
+                  {/* Shop, system, and one-time upload model sources */}
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-zinc-800">Model Source</label>
-                    <div className="flex gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       <button
                         type="button"
-                        onClick={() => setModelSource("template")}
+                        onClick={() => {
+                          setModelSource("my");
+                          setSelectedModelId(shopModels[0]?.id || "");
+                        }}
                         className={`flex-1 rounded-lg py-2 text-xs font-semibold border transition-all duration-150 ${
-                          modelSource === "template"
+                          modelSource === "my"
                             ? "bg-brand border-brand text-white shadow-soft-sm"
                             : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        Use Templates
+                        My Models
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModelSource("system");
+                          setSelectedModelId(models[0]?.id || "");
+                        }}
+                        className={`flex-1 rounded-lg py-2 text-xs font-semibold border transition-all duration-150 ${
+                          modelSource === "system"
+                            ? "bg-brand border-brand text-white shadow-soft-sm"
+                            : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        System Models
                       </button>
                       <button
                         type="button"
@@ -949,18 +977,7 @@ export function MediaGallery({
                             : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        Upload from PC
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setModelSource("ai")}
-                        className={`flex-1 rounded-lg py-2 text-xs font-semibold border transition-all duration-150 ${
-                          modelSource === "ai"
-                            ? "bg-brand border-brand text-white shadow-soft-sm"
-                            : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
-                        }`}
-                      >
-                        AI Russian Model
+                        Upload Model
                       </button>
                     </div>
                   </div>
@@ -974,29 +991,27 @@ export function MediaGallery({
                         onChange={(files) => selectFile(files, setCustomModelImage)}
                       />
                     </div>
-                  ) : modelSource === "ai" ? (
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-xs text-emerald-800">
-                      AI will create a realistic Russian ecommerce model based on the product title, category, description, garment details, gender, age group, and recommended body type.
-                      {recommendations?.recommendedAgeGroup ? ` Age group: ${recommendations.recommendedAgeGroup}.` : ""}
-                      {recommendations?.recommendedBodyType ? ` Body type: ${recommendations.recommendedBodyType}.` : ""}
-                      {recommendations?.recommendedEthnicity ? ` Ethnicity: ${recommendations.recommendedEthnicity}.` : ""}
-                      {recommendations?.recommendedModelStyle ? ` Style: ${recommendations.recommendedModelStyle}.` : ""}
-                    </div>
                   ) : (
                     <div className="space-y-3">
-                      {modelsLoadError && (
+                      {modelSource === "system" && modelsLoadError && (
                         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                           {modelsLoadError}
                         </div>
                       )}
-                      <ModelSelector
-                        selectedModelId={selectedModelId}
-                        models={models}
-                        onSelectModel={(model) => {
-                          setSelectedModelId(model.id);
-                          setValidationError("");
-                        }}
-                      />
+                      {modelSource === "my" && shopModels.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-sky-300 bg-sky-50 px-4 py-6 text-center text-sm text-sky-800">
+                          Shop này chưa có model riêng. Hãy thêm model từ mục <strong>My Models</strong> ở trang Home.
+                        </div>
+                      ) : (
+                        <ModelSelector
+                          selectedModelId={selectedModelId}
+                          models={activeModels}
+                          onSelectModel={(model) => {
+                            setSelectedModelId(model.id);
+                            setValidationError("");
+                          }}
+                        />
+                      )}
                     </div>
                   )}
 
@@ -1056,7 +1071,7 @@ export function MediaGallery({
                     )}
                   </div>
 
-                  {isGenderMismatch && modelSource === "template" && (
+                  {isGenderMismatch && modelSource !== "upload" && (
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs text-amber-800 flex items-start gap-2.5">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4 shrink-0 text-amber-600 mt-0.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
@@ -1067,7 +1082,7 @@ export function MediaGallery({
                     </div>
                   )}
 
-                  {selectedModel?.isAiGenerated && modelSource === "template" && (
+                  {selectedModel?.isAiGenerated && modelSource === "system" && (
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs text-amber-800 flex items-start gap-2.5 animate-fade-in">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4 shrink-0 text-amber-600 mt-0.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />

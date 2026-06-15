@@ -105,6 +105,46 @@ def test_primary_analysis_builds_safe_garment_fallback_when_provider_omits_it(mo
     assert result.garment_json["provider_garment_fallback_used"] is True
 
 
+def test_primary_analysis_switches_model_after_transient_failures(monkeypatch):
+    analyzer = GeminiAnalyzer(
+        Settings(
+            gemini_api_key="test-key",
+            gemini_model="gemini-2.5-flash",
+            gemini_fallback_model="gemini-2.5-flash-lite",
+            gemini_analysis_retry_attempts=2,
+            gemini_retry_backoff_seconds=0.1,
+        )
+    )
+    calls = []
+
+    def generate_content(*args, **kwargs):
+        model = kwargs["model"]
+        calls.append(model)
+        if model == "gemini-2.5-flash":
+            raise Exception("503 UNAVAILABLE high demand")
+        return SimpleNamespace(
+            text=json.dumps(
+                {
+                    "category": "Брюки",
+                    "product_name": "Брюки",
+                    "color": "черный",
+                    "features": [],
+                    "confidence": 0.8,
+                }
+            )
+        )
+
+    monkeypatch.setattr(analyzer._client.models, "generate_content", generate_content)
+    monkeypatch.setattr("app.services.gemini_analyzer.time.sleep", lambda _delay: None)
+    monkeypatch.setattr("app.services.gemini_analyzer.random.uniform", lambda *_args: 0)
+
+    result = analyzer.analyze([_image_bytes()], ProductInput(category="Брюки"))
+
+    assert calls == ["gemini-2.5-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    assert result.garment_json["analysis_model"] == "gemini-2.5-flash-lite"
+    assert result.garment_json["analysis_fallback_used"] is True
+
+
 @pytest.mark.anyio
 async def test_generate_draft_persists_canonical_garment_analysis_for_image_jobs(monkeypatch):
     image_bytes = _image_bytes()

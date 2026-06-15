@@ -15,6 +15,7 @@ from app.models.store import Store
 from app.models.user import User
 from app.schemas.card import CardUploadGroup
 from app.services.card_flow import CardFlowService
+from app.services.product_intent_parser import ProductIntentParser
 
 
 class CardJobRunner:
@@ -147,31 +148,59 @@ class CardJobRunner:
         db.commit()
 
     async def _wait_for_nm_ids(self, flow: CardFlowService, groups: list[CardUploadGroup]) -> dict[str, int]:
-        vendor_codes = [variant.vendorCode for group in groups for variant in group.variants]
         nm_map: dict[str, int] = {}
-        for vendor_code in vendor_codes:
-            normalized = vendor_code.strip().casefold()
-            for attempt in range(1, 31):
-                if attempt in {1, 4, 8, 15, 25}:
-                    await self._raise_if_wb_errors(flow, groups)
-                response = await flow.get_cards_by_text(vendor_code, limit=100, with_photo=-1)
-                cards = self._extract_cards(response)
-                found = next(
-                    (
-                        card
-                        for card in cards
-                        if normalized == str(card.get("vendorCode") or card.get("vendor_code") or "").strip().casefold()
-                    ),
-                    None,
-                )
-                nm_id = found and (found.get("nmID") or found.get("nmId") or found.get("nm_id"))
-                if nm_id:
-                    nm_map[vendor_code] = int(nm_id)
-                    break
-                await asyncio.sleep(min(5 + attempt * 0.5, 10))
-            if vendor_code not in nm_map:
-                raise RuntimeError(f'WB accepted the card, but NM ID was not found for vendorCode "{vendor_code}" yet.')
+        for group in groups:
+            for variant in group.variants:
+                vendor_code = variant.vendorCode
+                aliases = self._vendor_code_aliases(variant)
+                normalized_aliases = {alias.strip().casefold() for alias in aliases}
+                for attempt in range(1, 31):
+                    if attempt in {1, 4, 8, 15, 25}:
+                        await self._raise_if_wb_errors(flow, groups)
+                    search = aliases[min(attempt - 1, len(aliases) - 1)]
+                    response = await flow.get_cards_by_text(search, limit=100, with_photo=-1)
+                    cards = self._extract_cards(response)
+                    found = next(
+                        (
+                            card
+                            for card in cards
+                            if str(card.get("vendorCode") or card.get("vendor_code") or "").strip().casefold()
+                            in normalized_aliases
+                        ),
+                        None,
+                    )
+                    nm_id = found and (found.get("nmID") or found.get("nmId") or found.get("nm_id"))
+                    if nm_id:
+                        nm_map[vendor_code] = int(nm_id)
+                        break
+                    await asyncio.sleep(min(5 + attempt * 0.5, 10))
+                if vendor_code not in nm_map:
+                    raise RuntimeError(f'WB accepted the card, but NM ID was not found for vendorCode "{vendor_code}" yet.')
         return nm_map
+
+    @staticmethod
+    def _vendor_code_aliases(variant: Any) -> list[str]:
+        vendor_code = str(variant.vendorCode or "").strip()
+        aliases = [vendor_code]
+        if "/" not in vendor_code:
+            return aliases
+
+        base, suffix = vendor_code.rsplit("/", 1)
+        normalized_suffix = suffix.strip().casefold()
+        seen = {vendor_code.casefold()}
+        for characteristic in variant.characteristics:
+            values = characteristic.value if isinstance(characteristic.value, list) else [characteristic.value]
+            for value in values:
+                text = str(value or "").strip()
+                if not text:
+                    continue
+                if ProductIntentParser.vendor_suffix_from_color(text).casefold() != normalized_suffix:
+                    continue
+                alias = f"{base}/{text}"
+                if alias.casefold() not in seen:
+                    aliases.append(alias)
+                    seen.add(alias.casefold())
+        return aliases
 
     async def _raise_if_wb_errors(self, flow: CardFlowService, groups: list[CardUploadGroup]) -> None:
         vendor_codes = {variant.vendorCode for group in groups for variant in group.variants}

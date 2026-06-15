@@ -378,7 +378,7 @@ class CardGenerator:
                 expanded = []
                 for color in intent.colors:
                     variant = json.loads(json.dumps(template, ensure_ascii=False))
-                    variant["vendorCode"] = f"{vendor_base}/{color.code}"
+                    variant["vendorCode"] = f"{vendor_base}/{color.value}"
                     variant["brand"] = cls._brand(user_input)
                     variant["sizes"] = sizes
                     variant["dimensions"] = dimensions

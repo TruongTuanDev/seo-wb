@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { BarChart2, ListChecks, Plus, Settings, Store, Sparkles } from "lucide-react";
+import { ListChecks, Plus, Settings, Store, Sparkles, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { CreateStoreModal } from "@/components/dashboard/CreateStoreModal";
@@ -111,11 +111,11 @@ export default function DashboardPage() {
       href: sid ? `/cards/new?store_id=${sid}` : "/cards/new",
     },
     {
-      icon: BarChart2,
-      color: "bg-emerald-50 text-emerald-600",
-      title: t("viewFinance"),
-      desc: t("viewFinanceDesc"),
-      href: "/finance",
+      icon: UsersRound,
+      color: "bg-sky-50 text-sky-600",
+      title: "My Models",
+      desc: "Quản lý người mẫu riêng của shop",
+      href: "/models",
     },
     {
       icon: Settings,

@@ -3,6 +3,7 @@ import uuid
 from typing import Annotated, Any
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from fastapi.responses import FileResponse
 import asyncio
@@ -32,6 +33,7 @@ from app.schemas.card import (
     ImageAnalysis,
     ImageGenerationImageActionRequest,
     ImageGenerationJobResponse,
+    ImportWbCardRequest,
 )
 from app.services.card_flow import CardFlowService
 from app.services.rabbitmq_publisher import publish_sync_job
@@ -39,6 +41,7 @@ from app.services.admin_runtime import get_effective_ai_runtime_settings, list_p
 from app.services.billing_foundation import credit_cost_for_job, pending_credit_reservations, queue_name_for_plan
 from app.services.product_image_generator import ProductImageGenerator
 from app.services.redis_client import require_redis
+from app.services.shop_model_service import resolve_model_reference
 from app.services.usage_plans import get_usage_plan
 
 
@@ -799,15 +802,23 @@ async def enqueue_gpt_image_openai_job(
     front_bytes = await _read_upload_limited(productFrontImage, settings.max_upload_image_bytes, "image_too_large")
     back_bytes = await _read_upload_limited(productBackImage, settings.max_upload_image_bytes, "image_too_large") if productBackImage else None
 
-    # Resolve model reference image
+    # Resolve model reference image server-side so a shop cannot use another shop's model URL.
     model_bytes = None
+    resolved_model_url = ""
+    resolved_model_source = "upload" if modelImage else ("generated" if auto_model_generation else "")
+    persisted_model_id = "custom" if modelImage else ("auto_russian_model" if auto_model_generation else "none")
     if modelImage:
         model_bytes = await _read_upload_limited(modelImage, settings.max_upload_image_bytes, "image_too_large")
     elif selectedModelId and selectedModelId not in {"none", "auto_russian_model"}:
-        model_p = resolve_model_image_path(selectedModelId)
-        if model_p and model_p.exists():
-            with open(model_p, "rb") as f:
-                model_bytes = f.read()
+        model_p, resolved_model_url, resolved_gender, resolved_body_type, resolved_model_source = resolve_model_reference(
+            db,
+            store_id=store_id,
+            model_id=selectedModelId,
+        )
+        model_bytes = model_p.read_bytes()
+        selectedModelGender = resolved_gender
+        selectedModelBodyType = resolved_body_type
+        persisted_model_id = selectedModelId if resolved_model_source == "system" else "custom"
 
     analysis = _draft_analysis(draft)
     garment_json = _draft_garment_json(draft)
@@ -834,7 +845,9 @@ async def enqueue_gpt_image_openai_job(
         "title": draft.vendor_code or "garment",
         "category": "gpt-image",
         "model_id": "auto_russian_model" if auto_model_generation else ("custom" if modelImage else (selectedModelId or "none")),
-        "selected_model_image_url": "" if (modelImage or auto_model_generation) else (selectedModelImageUrl or ""),
+        "selected_model_image_url": resolved_model_url,
+        "model_source": resolved_model_source,
+        "shop_model_id": selectedModelId if resolved_model_source == "shop" else None,
         "selected_model_gender": selectedModelGender or analysis.get("gender") or "female",
         "selected_model_body_type": selectedModelBodyType or "",
         "style": style,
@@ -858,7 +871,7 @@ async def enqueue_gpt_image_openai_job(
         back_image=back_bytes,
         model_image=model_bytes,
         job_type="gpt_image_openai",
-        model_id="auto_russian_model" if auto_model_generation else ("custom" if modelImage else (selectedModelId or "none")),
+        model_id=persisted_model_id,
         queue_name=queue_name_for_plan(user.plan_type),
         credit_cost=credit_cost,
         db=db,
@@ -1005,6 +1018,107 @@ def list_drafts(
         offset=offset,
         has_more=offset + len(drafts) < total,
     )
+
+
+@router.post("/import-wb", response_model=DraftResponse)
+async def import_wb_card(
+    payload: ImportWbCardRequest,
+    store_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> DraftResponse:
+    store = get_owned_store(db, user, store_id)
+    flow = CardFlowService(settings, db, user, store)
+    response = await flow.get_cards_by_text(str(payload.nm_id), limit=100, with_photo=-1)
+    cards = response.get("cards") if isinstance(response, dict) else None
+    if not isinstance(cards, list):
+        data = response.get("data") if isinstance(response, dict) else None
+        cards = data.get("cards") if isinstance(data, dict) else []
+
+    card = next(
+        (
+            item
+            for item in cards
+            if int(item.get("nmID") or item.get("nmId") or item.get("nm_id") or 0) == payload.nm_id
+        ),
+        None,
+    )
+    if not card:
+        raise AppError(
+            "wb_card_not_found",
+            f"Không tìm thấy sản phẩm WB có NM ID {payload.nm_id} trong cửa hàng này.",
+            404,
+        )
+
+    characteristics = card.get("characteristics") or []
+    attributes = {
+        str(item.get("name")): _first_text_value(item.get("value"))
+        for item in characteristics
+        if item.get("name") and _first_text_value(item.get("value"))
+    }
+    photos = card.get("photos") or []
+    media_items = await _download_wb_card_media(
+        photos,
+        user_id=user.id,
+        nm_id=payload.nm_id,
+        max_file_bytes=settings.max_media_upload_bytes,
+    )
+
+    dimensions = card.get("dimensions") or {}
+    variant = {
+        "vendorCode": str(card.get("vendorCode") or payload.nm_id),
+        "title": str(card.get("title") or card.get("subjectName") or "Товар Wildberries"),
+        "description": str(card.get("description") or ""),
+        "brand": str(card.get("brand") or "Нет бренда"),
+        "dimensions": {
+            "length": dimensions.get("length") or 1,
+            "width": dimensions.get("width") or 1,
+            "height": dimensions.get("height") or 1,
+            "weightBrutto": dimensions.get("weightBrutto") or 0.1,
+        },
+        "characteristics": [
+            {"id": int(item["id"]), "name": item.get("name"), "value": item.get("value")}
+            for item in characteristics
+            if item.get("id")
+        ],
+        "sizes": card.get("sizes") or [{"techSize": "0", "wbSize": "0", "skus": []}],
+        "nmID": payload.nm_id,
+        "media": {
+            "cover": media_items[0]["url"] if media_items else None,
+            "local_files": media_items,
+        },
+    }
+    subject_id = int(card.get("subjectID") or card.get("subjectId") or 0)
+    draft = CardDraft(
+        user_id=user.id,
+        store_id=store.id,
+        status="imported",
+        subject_id=subject_id or None,
+        vendor_code=variant["vendorCode"],
+        analysis={
+            "category": card.get("subjectName"),
+            "product_name": card.get("title"),
+            "color": attributes.get("Цвет"),
+            "material": attributes.get("Состав"),
+            "attributes": attributes,
+            "confidence": 1,
+            "warnings": [],
+            "source": "wildberries",
+            "source_nm_id": payload.nm_id,
+        },
+        garment_json={},
+        card_payload=[{"subjectID": subject_id, "variants": [variant]}],
+        wb_response={
+            "imported": True,
+            "nm_map": {variant["vendorCode"]: payload.nm_id},
+            "source_nm_id": payload.nm_id,
+        },
+    )
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return _draft_response(draft)
 
 
 @router.get("/drafts/{draft_id}", response_model=DraftResponse)
@@ -1291,6 +1405,71 @@ def _get_owned_draft(db: Session, user: User, draft_id: int) -> CardDraft:
     if not draft or draft.user_id != user.id:
         raise AppError("draft_not_found", "Draft not found.", 404)
     return draft
+
+
+def _first_text_value(value: Any) -> str:
+    if isinstance(value, list):
+        return str(value[0]).strip() if value else ""
+    return str(value or "").strip()
+
+
+async def _download_wb_card_media(
+    photos: list[dict[str, Any]],
+    *,
+    user_id: int,
+    nm_id: int,
+    max_file_bytes: int,
+) -> list[dict[str, Any]]:
+    import_id = uuid.uuid4().hex
+    target_dir = Path("storage/wb_imports") / str(user_id) / f"{nm_id}-{import_id}"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    semaphore = asyncio.Semaphore(4)
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+        async def download(index: int, photo: dict[str, Any]) -> dict[str, Any] | None:
+            source_url = photo.get("big") or photo.get("c516x688") or photo.get("square") or photo.get("tm")
+            if not source_url or not str(source_url).startswith("https://"):
+                return None
+            async with semaphore:
+                try:
+                    async with client.stream("GET", str(source_url)) as response:
+                        response.raise_for_status()
+                        content_type = response.headers.get("content-type", "").split(";")[0].lower()
+                        if not content_type.startswith("image/"):
+                            return None
+                        suffix = {
+                            "image/png": ".png",
+                            "image/webp": ".webp",
+                        }.get(content_type, ".jpg")
+                        file_name = f"{index:03d}{suffix}"
+                        path = target_dir / file_name
+                        total = 0
+                        with path.open("wb") as target:
+                            async for chunk in response.aiter_bytes(CHUNK_SIZE):
+                                total += len(chunk)
+                                if total > max_file_bytes:
+                                    raise ValueError("WB image exceeds the configured media size limit.")
+                                target.write(chunk)
+                        return {
+                            "url": f"/storage/wb_imports/{user_id}/{target_dir.name}/{file_name}",
+                            "fileName": file_name,
+                            "photoNumber": index,
+                            "sourceUrl": source_url,
+                        }
+                except (httpx.HTTPError, OSError, ValueError):
+                    path = locals().get("path")
+                    if isinstance(path, Path):
+                        path.unlink(missing_ok=True)
+                    return None
+
+        results = await asyncio.gather(
+            *(download(index, photo) for index, photo in enumerate(photos, 1)),
+        )
+
+    media_items = [item for item in results if item]
+    if not media_items:
+        target_dir.rmdir()
+    return media_items
 
 
 def _draft_response(draft: CardDraft) -> DraftResponse:

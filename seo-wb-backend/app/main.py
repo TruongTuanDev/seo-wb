@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import admin, auth, cards, finance, public, stores, wb
+from app.api.routes import admin, auth, cards, finance, public, shop_models, stores, wb
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.rate_limit import FixedWindowRateLimiter, client_ip
@@ -86,6 +86,7 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(public.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(stores.router, prefix="/api/v1")
+app.include_router(shop_models.router, prefix="/api/v1")
 app.include_router(cards.router, prefix="/api/v1")
 app.include_router(finance.router, prefix="/api/v1")
 app.include_router(wb.router, prefix="/api/v1")
