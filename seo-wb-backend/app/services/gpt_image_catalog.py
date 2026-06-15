@@ -98,8 +98,11 @@ def file_to_data_uri(path: Path) -> str:
     return f"data:{mime};base64,{encoded}"
 
 
-def build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str, Any]]:
-    if quantity not in {3, 6, 9}:
+def _build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str, Any]]:
+    # Keep legacy jobs that requested the old 9-image bundle compatible.
+    if quantity == 9:
+        quantity = 8
+    if quantity not in {3, 6, 8}:
         quantity = 6
 
     if quantity == 3:
@@ -127,7 +130,7 @@ def build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str, 
                 {"pose": "extra_detail", "type": "detail", "label": "Extra Detail", "output_type": "detail", "validation_pose": "extra_detail"},
                 {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
             ]
-    else:  # quantity == 9
+    else:  # quantity == 8
         if has_back_image:
             return [
                 {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
@@ -137,7 +140,6 @@ def build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str, 
                 {"pose": "hand_on_hip", "type": "catalog", "label": "Hand On Hip", "output_type": "catalog", "validation_pose": "hand_on_hip"},
                 {"pose": "sitting", "type": "lifestyle", "label": "Sitting", "output_type": "lifestyle", "validation_pose": "sitting"},
                 {"pose": "fabric_detail", "type": "detail", "label": "Fabric Detail", "output_type": "detail", "validation_pose": "fabric_detail"},
-                {"pose": "logo_detail", "type": "detail", "label": "Logo Detail", "output_type": "detail", "validation_pose": "logo_detail"},
                 {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
             ]
         else:
@@ -148,10 +150,20 @@ def build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str, 
                 {"pose": "hand_on_hip", "type": "catalog", "label": "Hand On Hip", "output_type": "catalog", "validation_pose": "hand_on_hip"},
                 {"pose": "sitting", "type": "lifestyle", "label": "Sitting", "output_type": "lifestyle", "validation_pose": "sitting"},
                 {"pose": "fabric_detail", "type": "detail", "label": "Fabric Detail", "output_type": "detail", "validation_pose": "fabric_detail"},
-                {"pose": "logo_detail", "type": "detail", "label": "Logo Detail", "output_type": "detail", "validation_pose": "logo_detail"},
                 {"pose": "product_detail", "type": "detail", "label": "Product Detail", "output_type": "detail", "validation_pose": "product_detail"},
                 {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
             ]
+
+
+def build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str, Any]]:
+    tasks = _build_catalog_bundle(quantity, has_back_image)
+    focused_labels_by_size = {
+        3: {"Detail"},
+        6: {"Front", "Detail", "Back" if has_back_image else "Extra Detail"},
+        8: {"Front", "Side", "Fabric Detail", "Back" if has_back_image else "Product Detail"},
+    }
+    focused_labels = focused_labels_by_size[len(tasks)]
+    return [{**task, "product_focus": task["label"] in focused_labels} for task in tasks]
 
 
 class GPTImageCatalogService:
@@ -225,16 +237,9 @@ class GPTImageCatalogService:
             state["total"] = len(tasks_to_run)
             await save_state_fn(job_id, state)
 
-            # Calculate call budget limit
+            # Every bundle gets at most one quality retry, regardless of size.
             quantity = len(tasks_to_run)
-            if quantity == 3:
-                max_openai_calls = 4
-            elif quantity == 6:
-                max_openai_calls = 9
-            elif quantity == 9:
-                max_openai_calls = 13
-            else:
-                max_openai_calls = 9
+            max_openai_calls = quantity + 1
 
             openai_calls_count = 0
             initial_generation_calls = 0
@@ -312,6 +317,7 @@ class GPTImageCatalogService:
                     "pose": pose,
                     "task_type": task_type,
                     "output_type": output_type,
+                    "product_focus": bool(task.get("product_focus")),
                     "style": style,
                     "retry_used": retry_used,
                     "retry_skipped_due_to_limit": retry_skipped_due_to_limit,
@@ -401,6 +407,7 @@ class GPTImageCatalogService:
                             garment_json,
                             style,
                             pose,
+                            product_focus=bool(task.get("product_focus")),
                             has_model_reference=has_model_image,
                             selected_model_gender=metadata.get("selected_model_gender")
                         )
@@ -572,11 +579,18 @@ class GPTImageCatalogService:
                                 garment_json,
                                 style,
                                 pose,
+                                product_focus=bool(task.get("product_focus")),
                                 strict_retry_fields=val_res.get("failed_fields", []),
                                 has_model_reference=has_model_image,
                                 selected_model_gender=metadata.get("selected_model_gender")
                             )
 
+                    focus_block = GPTPromptBuilder.product_focus_block(
+                        garment_json,
+                        bool(task.get("product_focus")),
+                    )
+                    if focus_block and focus_block not in retry_prompt:
+                        retry_prompt = f"{focus_block}\n\n{retry_prompt}"
                     retry_prompt = GPTPromptBuilder.clean_cinematic_wording(retry_prompt)
 
                     async with progress_lock:

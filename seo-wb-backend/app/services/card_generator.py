@@ -7,7 +7,13 @@ from openai import OpenAI
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.schemas.card import CardUploadGroup, Dimensions, ImageAnalysis, ProductInput, SizeItem, Variant
+from app.services.product_description_builder import (
+    build_description_prompt_context,
+    build_product_description,
+    finalize_product_description,
+)
 from app.services.product_intent_parser import ProductIntent, ProductIntentParser
+from app.services.product_title_builder import build_product_title, select_best_ai_title
 
 
 SYSTEM_PROMPT = (
@@ -35,6 +41,42 @@ SYSTEM_PROMPT = (
     "- Размеры S-42 преобразуй в techSize=S и wbSize=42. Одиночный размер S означает techSize=S и wbSize=S. "
     "- Если есть vendor_code, vendorCode должен быть base/colorCode."
 )
+
+TITLE_GENERATION_PROMPT = """
+TITLE GENERATION RULES FOR ALL FASHION SUBJECTS:
+- Each variant must return titleCandidates: an array of 3 to 5 distinct Russian title options.
+- Write each option as natural Russian, not as concatenated attribute tokens.
+- Start every option with the exact resolved WB subjectName from category_context.
+- Adapt grammar and structure to the actual subject: tops, bottoms, dresses, skirts, outerwear, underwear, sets, sleepwear, and accessories require different wording.
+- Use only facts supported by image_analysis, user_input, and provided characteristics.
+- Prioritize product model, silhouette, length, construction, sleeve/neckline/closure, and one distinctive detail when relevant.
+- Never include gender, audience, age, color, brand, season, composition, or material.
+- Never add synonyms, keyword chains, unsupported claims, or duplicated meanings.
+- Do not output raw values such as "Высокая"; convert them into a grammatically complete phrase only when relevant to that subject.
+- Every option must be at most 60 characters.
+- Keep title as the strongest option, but still return titleCandidates for deterministic validation.
+
+SUBJECT PRIORITIES:
+- Брюки/Джинсы: model or silhouette, rise, supported construction detail.
+- Шорты: model such as бермуды or карго, silhouette, rise, supported detail.
+- Юбки: mini/midi/maxi length, silhouette such as А-силуэт or карандаш, pleats, wrap, or slit.
+- Платья: mini/midi/maxi length, silhouette, sleeve or supported construction detail.
+- Рубашки: fit, sleeve length, collar, buttons, or supported pocket construction.
+- Куртки: construction such as утепленная or стеганая, length, hood, collar, zipper, or belt.
+- Do not reuse trousers vocabulary such as штанинами or посадкой for dresses, shirts, or jackets.
+""".strip()
+
+DESCRIPTION_GENERATION_PROMPT = """
+DESCRIPTION GENERATION RULES FOR ALL FASHION SUBJECTS:
+- Write natural Russian prose specific to the exact resolved WB subject.
+- Use the provided description_blueprint as guidance, not as text to copy.
+- Describe supported construction, fit, material, comfort, use cases, styling, and safe care guidance.
+- Never mention a concrete color, gender, audience, brand, SEO process, keyword list, or raw attribute dump.
+- Never call the product another subject. Another garment may appear only as an obvious styling companion.
+- Never invent composition, season, closure, lining, protection, certification, originality, or guarantees.
+- Avoid emoji, bullet lists, keyword chains, repeated filler, and meta sentences about the description.
+- Write 3 to 5 short paragraphs, target 350 to 750 characters, and keep the language varied and natural.
+""".strip()
 
 
 class CardGenerator:
@@ -70,6 +112,23 @@ class CardGenerator:
             "user_input": user_input.model_dump(),
             "extracted_user_intent": self._intent_payload(intent),
             "image_analysis": analysis.model_dump(),
+            "title_generation_rules": {
+                "candidate_count": 5,
+                "language": "ru",
+                "max_length": 60,
+                "must_start_with_subject": True,
+                "forbidden_fields": ["gender", "audience", "age", "color", "brand", "season", "material", "composition"],
+                "use_only_supported_attributes": True,
+                "subject_priorities": {
+                    "Брюки/Джинсы": ["model", "silhouette", "rise", "detail"],
+                    "Шорты": ["model", "silhouette", "rise", "detail"],
+                    "Юбки": ["length", "silhouette", "pleats_or_wrap_or_slit"],
+                    "Платья": ["length", "silhouette", "sleeve_or_construction"],
+                    "Рубашки": ["fit", "sleeve", "collar_or_buttons_or_pockets"],
+                    "Куртки": ["construction", "length", "hood_or_collar_or_zipper_or_belt"],
+                },
+            },
+            "description_blueprint": build_description_prompt_context(subject.get("subjectName")),
             "category_context": {
                 "subjectID": subject["subjectID"],
                 "subjectName": subject.get("subjectName"),
@@ -84,13 +143,16 @@ class CardGenerator:
             response = self._client.chat.completions.create(
                 model=self._model,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "system",
+                        "content": f"{SYSTEM_PROMPT}\n\n{TITLE_GENERATION_PROMPT}\n\n{DESCRIPTION_GENERATION_PROMPT}",
+                    },
                     {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False, separators=(",", ":"))},
                 ],
                 temperature=0.2,
             )
             raw = json.loads(response.choices[0].message.content or "[]")
-            raw = self._enrich_openai_output(raw, user_input, intent, charcs)
+            raw = self._enrich_openai_output(raw, user_input, analysis, subject, intent, charcs)
             return [CardUploadGroup.model_validate(item) for item in raw]
         except Exception:
             return self._generate_fallback(user_input, analysis, subject, charcs, intent)
@@ -135,6 +197,8 @@ class CardGenerator:
         self,
         raw: Any,
         user_input: ProductInput,
+        analysis: ImageAnalysis,
+        subject: dict[str, Any],
         intent: ProductIntent,
         charcs: list[dict[str, Any]],
     ) -> Any:
@@ -148,6 +212,26 @@ class CardGenerator:
                     continue
                 variant.setdefault("vendorCode", self._vendor_base(user_input, intent))
                 variant["brand"] = self._brand(user_input)
+                subject_name = str(subject.get("subjectName") or analysis.category or user_input.category or "Товар")
+                raw_candidates = variant.pop("titleCandidates", variant.pop("title_candidates", []))
+                if not isinstance(raw_candidates, list):
+                    raw_candidates = []
+                candidates = [str(item) for item in raw_candidates if str(item).strip()]
+                if variant.get("title"):
+                    candidates.insert(0, str(variant["title"]))
+                variant["title"] = select_best_ai_title(
+                    subject_name,
+                    candidates,
+                    analysis,
+                    user_input,
+                    brand=self._brand(user_input),
+                ) or build_product_title(subject_name, analysis, user_input)
+                variant["description"] = finalize_product_description(
+                    subject_name,
+                    variant.get("description"),
+                    analysis,
+                    user_input,
+                )
                 variant.setdefault("dimensions", self._dimensions(user_input, intent))
                 if not variant.get("sizes"):
                     variant["sizes"] = [size.model_dump(mode="json", exclude_none=True) for size in self._sizes(user_input, intent)]
@@ -168,7 +252,7 @@ class CardGenerator:
         variant = Variant(
             vendorCode=self._vendor_base(user_input, intent),
             title=title,
-            description=self._description(analysis, title),
+            description=self._description(analysis, title, default_category, user_input),
             brand=self._brand(user_input),
             dimensions=Dimensions.model_validate(self._dimensions(user_input, intent)),
             characteristics=self._characteristics(user_input, analysis, charcs),
@@ -184,23 +268,16 @@ class CardGenerator:
 
     @staticmethod
     def _title(user_input: ProductInput, analysis: ImageAnalysis, default_category: str) -> str:
-        pieces = [analysis.product_name or user_input.category or default_category, analysis.fit_type]
-        title = " ".join(str(piece).strip() for piece in pieces if piece).strip()[:60].strip()
-        return title if len(title) >= 10 else f"{default_category} базовая модель"[:60]
+        return build_product_title(default_category, analysis, user_input)
 
     @staticmethod
-    def _description(analysis: ImageAnalysis, title: str) -> str:
-        features = ", ".join(analysis.features[:8])
-        attrs = ", ".join(f"{key}: {value}" for key, value in list(analysis.attributes.items())[:8])
-        parts = [
-            f"{title} - стильная и практичная модель для повседневного гардероба.",
-            f"Материал: {analysis.material}." if analysis.material else "",
-            f"Посадка или крой: {analysis.fit_type}." if analysis.fit_type else "",
-            f"Особенности модели: {features}." if features else "",
-            f"Дополнительные характеристики: {attrs}." if attrs else "",
-            "Модель легко сочетается с базовыми вещами и подходит для разных образов.",
-        ]
-        return " ".join(part for part in parts if part)[:5000]
+    def _description(
+        analysis: ImageAnalysis,
+        title: str,
+        subject_name: str | None = None,
+        user_input: ProductInput | None = None,
+    ) -> str:
+        return build_product_description(subject_name or analysis.category or title, analysis, user_input or ProductInput())
 
     @staticmethod
     def _sizes(user_input: ProductInput, intent: ProductIntent | None = None) -> list[SizeItem]:

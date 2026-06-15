@@ -1,0 +1,8 @@
+# Local deployment secrets
+deploy/env/*.env
+!deploy/env/*.env.example
+
+# Environment files
+.env
+.env.*
+!.env.example

@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDropzone } from "react-dropzone";
-import { ImagePlus, X } from "lucide-react";
+import { ImagePlus, RotateCcw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ImageDropzoneProps {
@@ -12,136 +12,191 @@ interface ImageDropzoneProps {
   maxFiles?: number;
 }
 
-export function ImageDropzone({ files, onChange, maxFiles = 10 }: ImageDropzoneProps) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [zoomUrl, setZoomUrl] = useState<string | null>(null);
+interface ImageSlotProps {
+  label: string;
+  hint: string;
+  file?: File;
+  previewUrl?: string;
+  required?: boolean;
+  disabled?: boolean;
+  onSelect: (file: File) => void;
+  onRemove: () => void;
+  onZoom: () => void;
+}
 
-  const previews = useMemo(
-    () => files.map((file) => ({
-      id: `${file.name}-${file.size}-${file.lastModified}`,
-      url: URL.createObjectURL(file),
-    })),
-    [files]
-  );
-
-  useEffect(() => {
-    return () => {
-      previews.forEach((preview) => URL.revokeObjectURL(preview.url));
-    };
-  }, [previews]);
-
-  const safeSelectedIndex = previews.length ? Math.min(selectedIndex, previews.length - 1) : 0;
-
-  const onDrop = useCallback(
-    (acceptedFiles: File[]) => {
-      const newFiles = [...files, ...acceptedFiles].slice(0, maxFiles);
-      onChange(newFiles);
-      setSelectedIndex(files.length ? files.length : 0);
+function ImageSlot({
+  label,
+  hint,
+  file,
+  previewUrl,
+  required = false,
+  disabled = false,
+  onSelect,
+  onRemove,
+  onZoom,
+}: ImageSlotProps) {
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
+    onDrop: (acceptedFiles) => {
+      const selected = acceptedFiles[0];
+      if (selected) onSelect(selected);
     },
-    [files, maxFiles, onChange]
-  );
-
-  const removeFile = (index: number) => {
-    onChange(files.filter((_, i) => i !== index));
-  };
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
     accept: {
       "image/jpeg": [],
       "image/png": [],
       "image/webp": [],
     },
-    maxFiles: maxFiles - files.length,
-    disabled: files.length >= maxFiles,
+    maxFiles: 1,
+    multiple: false,
+    disabled,
+    noClick: Boolean(file),
   });
 
   return (
-    <div className="w-full space-y-4">
-      {previews.length > 0 && (
-        <div className="space-y-3">
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-zinc-900">
+            {label}
+            {required && <span className="ml-1 text-rose-500">*</span>}
+          </div>
+          <div className="text-xs text-zinc-500">{hint}</div>
+        </div>
+        {file && (
           <button
             type="button"
-            onClick={() => setZoomUrl(previews[safeSelectedIndex]?.url || null)}
-            className="group relative block w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 transition-all duration-200 hover:border-zinc-300 hover:shadow-soft-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+            onClick={open}
+            className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={previews[safeSelectedIndex]?.url}
-              alt={`Preview ${safeSelectedIndex + 1}`}
-              draggable={false}
-              className="max-h-[360px] w-full object-contain transition-transform duration-300 group-hover:scale-[1.01] sm:max-h-[460px]"
-            />
-            <span className="absolute left-3 top-3 rounded-full bg-black/70 px-2.5 py-1 text-xs text-white">
-              {safeSelectedIndex + 1} / {previews.length}
-            </span>
+            <RotateCcw size={13} />
+            Thay ảnh
           </button>
-
-          <div className="grid grid-cols-2 gap-3">
-            {previews.map((preview, index) => (
-              <button
-                type="button"
-                key={preview.id}
-                onClick={() => setSelectedIndex(index)}
-                className={cn(
-                  "group relative aspect-[4/3] overflow-hidden rounded-lg border bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
-                  selectedIndex === index ? "border-brand" : "border-zinc-200"
-                )}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={preview.url}
-                  alt={`Preview ${index + 1}`}
-                  draggable={false}
-                  className="h-full w-full object-cover"
-                />
-                <div className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white backdrop-blur-sm">
-                  {index + 1}
-                </div>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    removeFile(index);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      removeFile(index);
-                    }
-                  }}
-                  className="absolute right-2 top-2 rounded-full bg-rose-500/90 p-1.5 text-white opacity-0 backdrop-blur-sm transition-opacity duration-150 group-hover:opacity-100 hover:bg-rose-600"
-                >
-                  <X className="h-4 w-4" />
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <div
-        {...getRootProps()}
+        {...getRootProps({
+          onClick: file
+            ? (event) => {
+                event.preventDefault();
+                onZoom();
+              }
+            : undefined,
+        })}
         className={cn(
-          "flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition-all duration-200",
-          isDragActive
-            ? "border-indigo-400 bg-indigo-50/50 text-brand shadow-soft-md"
-            : files.length >= maxFiles
-              ? "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-400 opacity-60"
-              : "border-zinc-300 text-zinc-500 hover:border-indigo-400 hover:bg-indigo-50/50"
+          "relative flex aspect-[3/4] min-h-52 overflow-hidden rounded-xl border-2 border-dashed transition-all duration-200",
+          disabled
+            ? "cursor-not-allowed border-zinc-200 bg-zinc-100 opacity-60"
+            : isDragActive
+              ? "border-indigo-500 bg-indigo-50 shadow-soft-md"
+              : file
+                ? "cursor-zoom-in border-zinc-200 bg-zinc-50 hover:border-indigo-300"
+                : "cursor-pointer border-zinc-300 bg-zinc-50/70 hover:border-indigo-400 hover:bg-indigo-50/50"
         )}
       >
         <input {...getInputProps()} />
-        <ImagePlus className={cn("mb-2 h-9 w-9", isDragActive ? "text-brand" : "text-zinc-500")} />
-        {files.length >= maxFiles ? (
-          <p className="text-sm font-medium">Maximum {maxFiles} images reached</p>
-        ) : isDragActive ? (
-          <p className="text-sm font-medium">Drop images here</p>
+        {file && previewUrl ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={previewUrl} alt={label} className="h-full w-full object-contain" />
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemove();
+              }}
+              className="absolute right-2 top-2 rounded-full bg-rose-500 p-1.5 text-white shadow hover:bg-rose-600"
+              aria-label={`Xóa ${label}`}
+            >
+              <X size={15} />
+            </button>
+          </>
         ) : (
-          <p className="text-sm font-medium">Drag & drop images here, or click to select files</p>
+          <div className="m-auto flex max-w-44 flex-col items-center px-4 text-center">
+            <ImagePlus className={cn("mb-3 h-9 w-9", isDragActive ? "text-indigo-600" : "text-zinc-400")} />
+            <div className="text-sm font-medium text-zinc-700">
+              {isDragActive ? "Thả ảnh vào đây" : disabled ? "Nạp ảnh trước trước tiên" : "Chọn hoặc kéo ảnh vào"}
+            </div>
+            <div className="mt-1 text-xs text-zinc-500">JPG, PNG hoặc WEBP</div>
+          </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+export function ImageDropzone({ files, onChange, maxFiles = 2 }: ImageDropzoneProps) {
+  const [zoomUrl, setZoomUrl] = useState<string | null>(null);
+  const [pendingBackImage, setPendingBackImage] = useState<File | null>(null);
+  const limitedFiles = useMemo(
+    () => files.slice(0, Math.min(maxFiles, 2)),
+    [files, maxFiles]
+  );
+  const backImage = limitedFiles[1] || pendingBackImage || undefined;
+  const previews = useMemo(
+    () => [
+      limitedFiles[0] ? URL.createObjectURL(limitedFiles[0]) : "",
+      backImage ? URL.createObjectURL(backImage) : "",
+    ],
+    [limitedFiles, backImage]
+  );
+
+  useEffect(() => {
+    return () => previews.forEach((url) => {
+      if (url) URL.revokeObjectURL(url);
+    });
+  }, [previews]);
+
+  const setFile = (index: number, file: File) => {
+    if (index === 1 && !limitedFiles[0]) {
+      setPendingBackImage(file);
+      return;
+    }
+    if (index === 0 && pendingBackImage) {
+      onChange([file, pendingBackImage]);
+      setPendingBackImage(null);
+      return;
+    }
+    const next = [...limitedFiles];
+    next[index] = file;
+    onChange(next.slice(0, 2));
+  };
+
+  const removeFile = (index: number) => {
+    if (index === 0) {
+      if (limitedFiles[1]) setPendingBackImage(limitedFiles[1]);
+      onChange([]);
+      return;
+    }
+    setPendingBackImage(null);
+    onChange(limitedFiles.filter((_, fileIndex) => fileIndex !== index));
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <ImageSlot
+          label="Ảnh mặt trước"
+          hint="Ảnh chính để nhận diện sản phẩm"
+          file={limitedFiles[0]}
+          previewUrl={previews[0]}
+          required
+          onSelect={(file) => setFile(0, file)}
+          onRemove={() => removeFile(0)}
+          onZoom={() => setZoomUrl(previews[0] || null)}
+        />
+        <ImageSlot
+          label="Ảnh mặt sau"
+          hint="Khuyến nghị để nhận diện đầy đủ chi tiết"
+          file={backImage}
+          previewUrl={previews[1]}
+          onSelect={(file) => setFile(1, file)}
+          onRemove={() => removeFile(1)}
+          onZoom={() => setZoomUrl(previews[1] || null)}
+        />
+      </div>
+
+      <div className="rounded-lg bg-indigo-50 px-3 py-2 text-xs leading-relaxed text-indigo-800">
+        AI sẽ dùng chung hai ảnh này để tạo thuộc tính, nội dung và ảnh sản phẩm. Bạn không cần tải lại ở bước sau.
       </div>
 
       {zoomUrl && typeof document !== "undefined" &&
@@ -154,7 +209,7 @@ export function ImageDropzone({ files, onChange, maxFiles = 10 }: ImageDropzoneP
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={zoomUrl}
-              alt="Large preview"
+              alt="Xem ảnh sản phẩm"
               onClick={(event) => event.stopPropagation()}
               className="max-h-full max-w-full cursor-default rounded-xl object-contain"
             />

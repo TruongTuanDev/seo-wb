@@ -12,6 +12,7 @@ from app.models.user import User
 from app.schemas.card import CardUploadGroup, ImageAnalysis, ProductInput
 from app.services.card_generator import CardGenerator
 from app.services.card_payload_enricher import CardPayloadEnricher
+from app.services.garment_analyzer import GarmentAnalyzer
 from app.services.gemini_analyzer import GeminiAnalyzer
 from app.services.subject_resolver import SubjectResolver
 from app.services.wb_client import WildberriesClient
@@ -40,6 +41,16 @@ class CardFlowService:
         )
         raw_payload = [group.model_dump(mode="json", exclude_none=True) for group in card_payload]
         await self._enrich_payload(raw_payload, int(subject["subjectID"]), user_input=user_input, analysis=analysis)
+        first_variant = raw_payload[0]["variants"][0] if raw_payload and raw_payload[0].get("variants") else {}
+        garment_json = GarmentAnalyzer.normalize_analysis(
+            analysis.garment_json,
+            front_image_bytes=image_bytes[0],
+            title=str(first_variant.get("title") or analysis.product_name or ""),
+            description=str(first_variant.get("description") or ""),
+            category=str(subject.get("subjectName") or analysis.category or user_input.category or ""),
+            gender=analysis.gender or user_input.gender,
+        )
+        analysis.garment_json = garment_json
         draft = CardDraft(
             user_id=self._user.id,
             store_id=self._store.id,
@@ -47,6 +58,7 @@ class CardFlowService:
             subject_id=int(subject["subjectID"]),
             vendor_code=card_payload[0].variants[0].vendorCode if card_payload and card_payload[0].variants else None,
             analysis=analysis.model_dump(),
+            garment_json=garment_json,
             card_payload=raw_payload,
         )
         self._db.add(draft)

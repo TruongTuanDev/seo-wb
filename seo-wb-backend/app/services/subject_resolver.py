@@ -38,12 +38,12 @@ class SubjectResolver:
         self._wb = wb_client
 
     async def resolve(self, user_input: ProductInput, analysis: ImageAnalysis) -> dict[str, Any]:
-        subjects = await self._wb.get_subjects(parent_id=1, locale="ru")
+        subjects = await self._wb.get_subjects(parent_id=None, locale="ru")
         if user_input.subject_id:
             for subject in subjects:
                 if int(subject.get("subjectID", 0)) == user_input.subject_id:
                     return subject
-            raise AppError("subject_not_found", "Provided subject_id was not found in Wildberries clothes subjects.", 422)
+            raise AppError("subject_not_found", "Provided subject_id was not found in Wildberries subjects.", 422)
 
         source_text = self._source_text(user_input, analysis)
         if not source_text:
@@ -182,31 +182,35 @@ class SubjectResolver:
             return None
         scored: list[tuple[float, dict[str, Any]]] = []
         for subject in subjects:
-            subject_key = cls._normalize_text(str(subject.get("subjectName") or ""))
-            if not subject_key:
-                continue
-            subject_tokens = set(cls._tokens(subject_key))
-            score = SequenceMatcher(None, source_key, subject_key).ratio()
-            if subject_key in source_key:
-                score = max(score, 0.68)
-            if source_key in subject_key:
-                score = max(score, 0.76)
-            if subject_tokens:
-                overlap = len(source_tokens & subject_tokens) / len(subject_tokens)
-                score = max(score, overlap)
+            score = cls._deterministic_score(source_key, source_tokens, str(subject.get("subjectName") or ""))
             scored.append((score, subject))
         return max(scored, key=lambda item: item[0], default=None)
 
     @classmethod
     def _top_candidate_details(cls, subjects: list[dict[str, Any]], source_text: str) -> list[dict[str, Any]]:
         source_key = cls._normalize_text(cls._strip_noise(source_text))
+        source_tokens = set(cls._tokens(source_key))
         scored = []
         for subject in subjects:
             subject_name = str(subject.get("subjectName") or "")
-            subject_key = cls._normalize_text(subject_name)
-            score = SequenceMatcher(None, source_key, subject_key).ratio() if subject_key else 0
+            score = cls._deterministic_score(source_key, source_tokens, subject_name)
             scored.append({"subjectID": subject.get("subjectID"), "subjectName": subject_name, "score": round(score, 3)})
         return sorted(scored, key=lambda item: item["score"], reverse=True)[:5]
+
+    @classmethod
+    def _deterministic_score(cls, source_key: str, source_tokens: set[str], subject_name: str) -> float:
+        subject_key = cls._normalize_text(subject_name)
+        if not source_key or not subject_key:
+            return 0
+        subject_tokens = set(cls._tokens(subject_key))
+        score = SequenceMatcher(None, source_key, subject_key).ratio()
+        if subject_key in source_key:
+            score = max(score, 0.68)
+        if source_key in subject_key:
+            score = max(score, 0.76)
+        if subject_tokens:
+            score = max(score, len(source_tokens & subject_tokens) / len(subject_tokens))
+        return score
 
     @staticmethod
     def _subject_options(subjects: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -220,7 +224,12 @@ class SubjectResolver:
     def _strip_noise(value: str) -> str:
         value = " ".join(str(value or "").casefold().split())
         value = re.sub(r"\b(?:mã|ma|sku|article|vendor|арт(?:икул)?)\s*[:#-]?\s*[\w-]+", " ", value)
-        value = re.sub(r"\b(?:size|размер|kích thước|kich thuoc|cân nặng|can nang|weight)\b.*", " ", value)
+        value = re.sub(
+            r"\b(?:size|размер|kích thước|kich thuoc|cân nặng|can nang|weight)\b",
+            " ",
+            value,
+        )
+        value = re.sub(r"\b\d+(?:[xх×]\d+){1,3}\b", " ", value)
         value = re.sub(r"\b\d+(?:[.,]\d+)?(?:-\d+)?\b", " ", value)
         return re.sub(r"[,;/()]+", " ", value)
 

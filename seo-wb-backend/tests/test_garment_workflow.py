@@ -64,6 +64,16 @@ def test_gpt_prompt_builder():
     assert "#BFD4E8" in prompt
     assert "rhinestones" in prompt
 
+    focused_prompt = GPTPromptBuilder.build_prompt(
+        garment_json,
+        "studio",
+        "front",
+        product_focus=True,
+    )
+    assert "PRODUCT-FOCUSED CAMERA FRAMING" in focused_prompt
+    assert "Frame primarily from the waist to the feet." in focused_prompt
+    assert "The lower-body product must occupy most of the image." in focused_prompt
+
     # Retry Prompt (Strict Garment Preservation Mode)
     strict_prompt = GPTPromptBuilder.build_prompt(
         garment_json,
@@ -126,22 +136,30 @@ def test_build_tasks_quantity_rules():
     tasks_3 = GPTImageCatalogService.build_tasks(3, has_back_image=True)
     assert len(tasks_3) == 3
     assert [task["label"] for task in tasks_3] == ["Front", "Lifestyle", "Detail"]
+    assert sum(bool(task["product_focus"]) for task in tasks_3) == 1
 
     tasks_6_back = GPTImageCatalogService.build_tasks(6, has_back_image=True)
     assert len(tasks_6_back) == 6
     assert [task["label"] for task in tasks_6_back] == ["Front", "Side", "Back", "Lifestyle", "Detail", "Banner"]
+    assert sum(bool(task["product_focus"]) for task in tasks_6_back) == 3
 
     tasks_6_no_back = GPTImageCatalogService.build_tasks(6, has_back_image=False)
     assert len(tasks_6_no_back) == 6
     assert [task["label"] for task in tasks_6_no_back] == ["Front", "Side", "Lifestyle", "Detail", "Extra Detail", "Banner"]
+    assert sum(bool(task["product_focus"]) for task in tasks_6_no_back) == 3
 
-    tasks_9_back = GPTImageCatalogService.build_tasks(9, has_back_image=True)
-    assert len(tasks_9_back) == 9
-    assert [task["label"] for task in tasks_9_back] == ["Front", "Side", "Back", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Logo Detail", "Banner"]
+    tasks_8_back = GPTImageCatalogService.build_tasks(8, has_back_image=True)
+    assert len(tasks_8_back) == 8
+    assert [task["label"] for task in tasks_8_back] == ["Front", "Side", "Back", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Banner"]
+    assert sum(bool(task["product_focus"]) for task in tasks_8_back) == 4
 
-    tasks_9_no_back = GPTImageCatalogService.build_tasks(9, has_back_image=False)
-    assert len(tasks_9_no_back) == 9
-    assert [task["label"] for task in tasks_9_no_back] == ["Front", "Side", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Logo Detail", "Product Detail", "Banner"]
+    tasks_8_no_back = GPTImageCatalogService.build_tasks(8, has_back_image=False)
+    assert len(tasks_8_no_back) == 8
+    assert [task["label"] for task in tasks_8_no_back] == ["Front", "Side", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Product Detail", "Banner"]
+    assert sum(bool(task["product_focus"]) for task in tasks_8_no_back) == 4
+
+    # Legacy 9-image jobs use the new 8-image bundle.
+    assert GPTImageCatalogService.build_tasks(9, has_back_image=True) == tasks_8_back
 
     # Unsupported quantity fallback
     tasks_fallback = GPTImageCatalogService.build_tasks(5, has_back_image=True)
@@ -436,7 +454,7 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
     assert any("Validation retry skipped because OpenAI call limit was reached." in w for w in banner_img["validation_result"]["warnings"])
 
     # ----------------------------------------------------
-    # Case 2: 6-image bundle limit (Max 9 calls)
+    # Case 2: 6-image bundle limit (Max 7 calls)
     # ----------------------------------------------------
     state_6 = {
         "status": "queued",
@@ -471,12 +489,12 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
         use_openai=True
     )
     
-    assert len(openai_calls) == 9
+    assert len(openai_calls) == 7
     job_calls_metadata_6 = saved_states[-1]["openai_calls_metadata"]
-    assert job_calls_metadata_6["openai_call_limit"] == 9
-    assert job_calls_metadata_6["openai_calls_used"] == 9
+    assert job_calls_metadata_6["openai_call_limit"] == 7
+    assert job_calls_metadata_6["openai_calls_used"] == 7
     assert job_calls_metadata_6["initial_generation_calls"] == 6
-    assert job_calls_metadata_6["retry_calls_used"] == 3
+    assert job_calls_metadata_6["retry_calls_used"] == 1
     assert job_calls_metadata_6["retry_budget_remaining"] == 0
     assert job_calls_metadata_6["retry_skipped_due_to_limit"] is True
     
@@ -488,19 +506,19 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
     img_banner = next(img for img in result_6["images"] if img["label"] == "Banner")
     
     assert img_front["retry_used"] is True
-    assert img_side["retry_used"] is True
-    assert img_back["retry_used"] is True
+    assert img_side["retry_skipped_due_to_limit"] is True
+    assert img_back["retry_skipped_due_to_limit"] is True
     
     assert img_lifestyle["retry_skipped_due_to_limit"] is True
     assert img_detail["retry_skipped_due_to_limit"] is True
     assert img_banner["retry_skipped_due_to_limit"] is True
 
     # ----------------------------------------------------
-    # Case 3: 9-image bundle limit (Max 13 calls)
+    # Case 3: 8-image bundle limit (Max 9 calls)
     # ----------------------------------------------------
     state_9 = {
         "status": "queued",
-        "total": 9,
+        "total": 8,
         "metadata": {
             "style": "studio",
             "model": "gpt-image-2",
@@ -512,7 +530,6 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
                 {"pose": "hand_on_hip", "type": "catalog", "label": "Hand On Hip", "output_type": "catalog", "validation_pose": "hand_on_hip"},
                 {"pose": "sitting", "type": "lifestyle", "label": "Sitting", "output_type": "lifestyle", "validation_pose": "sitting"},
                 {"pose": "fabric_detail", "type": "detail", "label": "Fabric Detail", "output_type": "detail", "validation_pose": "fabric_detail"},
-                {"pose": "logo_detail", "type": "detail", "label": "Logo Detail", "output_type": "detail", "validation_pose": "logo_detail"},
                 {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
             ],
             "runtime_config": {
@@ -534,12 +551,12 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
         use_openai=True
     )
     
-    assert len(openai_calls) == 13
+    assert len(openai_calls) == 9
     job_calls_metadata_9 = saved_states[-1]["openai_calls_metadata"]
-    assert job_calls_metadata_9["openai_call_limit"] == 13
-    assert job_calls_metadata_9["openai_calls_used"] == 13
-    assert job_calls_metadata_9["initial_generation_calls"] == 9
-    assert job_calls_metadata_9["retry_calls_used"] == 4
+    assert job_calls_metadata_9["openai_call_limit"] == 9
+    assert job_calls_metadata_9["openai_calls_used"] == 9
+    assert job_calls_metadata_9["initial_generation_calls"] == 8
+    assert job_calls_metadata_9["retry_calls_used"] == 1
     assert job_calls_metadata_9["retry_budget_remaining"] == 0
     assert job_calls_metadata_9["retry_skipped_due_to_limit"] is True
     
@@ -550,18 +567,16 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
     img_hand = next(img for img in result_9["images"] if img["label"] == "Hand On Hip")
     img_sitting = next(img for img in result_9["images"] if img["label"] == "Sitting")
     img_fabric = next(img for img in result_9["images"] if img["label"] == "Fabric Detail")
-    img_logo = next(img for img in result_9["images"] if img["label"] == "Logo Detail")
     img_banner = next(img for img in result_9["images"] if img["label"] == "Banner")
     
     assert img_front["retry_used"] is True
-    assert img_side["retry_used"] is True
-    assert img_back["retry_used"] is True
-    assert img_walking["retry_used"] is True
+    assert img_side["retry_skipped_due_to_limit"] is True
+    assert img_back["retry_skipped_due_to_limit"] is True
+    assert img_walking["retry_skipped_due_to_limit"] is True
     
     assert img_hand["retry_skipped_due_to_limit"] is True
     assert img_sitting["retry_skipped_due_to_limit"] is True
     assert img_fabric["retry_skipped_due_to_limit"] is True
-    assert img_logo["retry_skipped_due_to_limit"] is True
     assert img_banner["retry_skipped_due_to_limit"] is True
 
 

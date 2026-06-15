@@ -28,6 +28,24 @@ POSES = {
 
 class GPTPromptBuilder:
     @staticmethod
+    def product_focus_block(garment_json: dict[str, Any], product_focus: bool) -> str:
+        if not product_focus:
+            return ""
+        area = str(garment_json.get("garment_area") or "upper_body").lower().strip()
+        if area == "lower_body":
+            framing = "Frame primarily from the waist to the feet. The lower-body product must occupy most of the image."
+        elif area == "full_body":
+            framing = "Show the complete full-body garment from neckline to hem. The garment must occupy most of the image."
+        else:
+            framing = "Frame primarily from the shoulders to the hips. The upper-body product must occupy most of the image."
+        return (
+            "PRODUCT-FOCUSED CAMERA FRAMING:\n"
+            f"{framing}\n"
+            "Prioritize the product over the model's face and surrounding background.\n"
+            "Keep the complete product visible and do not crop any important product edge or detail."
+        )
+
+    @staticmethod
     def _article_context_block(garment_json: dict[str, Any]) -> str:
         source_title = str(garment_json.get("source_title") or "").strip()
         source_description = str(garment_json.get("source_description") or "").strip()
@@ -117,6 +135,7 @@ The product itself must remain visually identical to the source.
         garment_json: dict[str, Any],
         style: str,
         pose: str,
+        product_focus: bool = False,
         strict_retry_fields: list[str] | None = None,
         has_model_reference: bool = True,
         selected_model_gender: str | None = None
@@ -286,6 +305,7 @@ The product itself must remain visually identical to the source.
             color_lock_prompt,
             f"Style Setting:\n{style_desc}",
             f"Pose Instruction:\n{pose_desc}",
+            GPTPromptBuilder.product_focus_block(garment_json, product_focus),
             area_prompt,
             garment_info
         ]

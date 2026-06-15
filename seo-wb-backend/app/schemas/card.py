@@ -35,6 +35,7 @@ class ImageAnalysis(BaseModel):
     package: dict[str, Any] = Field(default_factory=dict)
     vendor_code_base: str | None = Field(default=None, max_length=180)
     recommendations: dict[str, Any] = Field(default_factory=dict)
+    garment_json: dict[str, Any] = Field(default_factory=dict)
 
 
 class Dimensions(BaseModel):

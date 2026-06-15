@@ -9,6 +9,7 @@ from PIL import Image, UnidentifiedImageError
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.schemas.card import ImageAnalysis, ProductInput
+from app.services.garment_analyzer import GARMENT_SCHEMA, GarmentAnalyzer
 from app.services.product_intent_parser import ProductIntentParser
 
 
@@ -65,6 +66,7 @@ ANALYSIS_SCHEMA = {
             },
         },
         "vendor_code_base": {"type": "STRING"},
+        "garment_analysis": GARMENT_SCHEMA,
     },
 }
 
@@ -104,7 +106,7 @@ class GeminiAnalyzer:
 
         try:
             raw = json.loads(response.text or "{}")
-            raw = self._normalize_analysis(raw)
+            raw = self._normalize_analysis(raw, image_bytes_list[0], user_input)
             raw["source_image_count"] = len(images)
             from app.services.studio_recommender import recommend_for_product
             raw["recommendations"] = recommend_for_product(raw, user_input)
@@ -118,7 +120,7 @@ class GeminiAnalyzer:
             ) from exc
 
     @staticmethod
-    def _normalize_analysis(raw: dict) -> dict:
+    def _normalize_analysis(raw: dict, front_image_bytes: bytes, user_input: ProductInput) -> dict:
         attributes = raw.get("attributes")
         if isinstance(attributes, list):
             normalized = {}
@@ -140,7 +142,51 @@ class GeminiAnalyzer:
         raw["package"] = GeminiAnalyzer._normalize_package(raw.get("package"))
         if raw.get("vendor_code_base") is not None:
             raw["vendor_code_base"] = str(raw["vendor_code_base"]).strip() or None
+        garment_json = raw.pop("garment_analysis", None)
+        used_garment_fallback = not isinstance(garment_json, dict)
+        if used_garment_fallback:
+            garment_json = GeminiAnalyzer._garment_fallback_from_analysis(raw)
+        raw["garment_json"] = GarmentAnalyzer.normalize_analysis(
+            garment_json,
+            front_image_bytes=front_image_bytes,
+            title=raw.get("product_name"),
+            category=user_input.category or raw.get("category"),
+            gender=user_input.gender or raw.get("gender"),
+        )
+        raw["garment_json"]["analysis_source"] = "primary_product_vision"
+        raw["garment_json"]["analysis_version"] = 1
+        raw["garment_json"]["provider_garment_fallback_used"] = used_garment_fallback
         return raw
+
+    @staticmethod
+    def _garment_fallback_from_analysis(raw: dict) -> dict:
+        features = [str(item).strip() for item in raw.get("features", []) if str(item).strip()]
+        product_name = str(raw.get("product_name") or raw.get("category") or "garment")
+        return {
+            "product_type": product_name,
+            "category": raw.get("category") or "clothing",
+            "gender": raw.get("gender") or "female",
+            "main_color": raw.get("color") or "unknown",
+            "secondary_colors": [],
+            "material": raw.get("material") or "fabric",
+            "fabric_texture": "unknown",
+            "silhouette": raw.get("fit_type") or "regular",
+            "fit": raw.get("fit_type") or "regular",
+            "length": "regular",
+            "waist": "unknown",
+            "neckline": "unknown",
+            "sleeves": "unknown",
+            "closure": "unknown",
+            "pockets": "unknown",
+            "hem": "unknown",
+            "logo_or_text": "none",
+            "front_view": {"description": product_name, "key_details": features},
+            "back_view": {"description": "Back view from uploaded reference", "key_details": []},
+            "special_details": features,
+            "must_preserve": features,
+            "must_not_change": [],
+            "prompt_summary": product_name,
+        }
 
     @staticmethod
     def _normalize_variant_colors(raw: object) -> list[dict[str, str]]:
@@ -247,11 +293,17 @@ Rules:
 - Extract sizes into sizes. For S-42, return techSize=S and wbSize=42. For single size S, return techSize=S and wbSize=S.
 - Extract package dimensions into package using length, width, height, weightBrutto.
 - Extract base seller article/vendor code into vendor_code_base, without color suffix.
+- Return garment_analysis in the same response. It will be reused for image generation, so describe the exact construction, front/back details, fabric texture, silhouette, fit, length, closures, pockets, hem, logos, decorations, and details that must not change.
+- garment_analysis must describe only visible or user-confirmed facts. Use "unknown" for details that cannot be verified.
+- Put every distinctive detail that image generation must preserve into garment_analysis.must_preserve.
 - For category, return the closest Wildberries clothes subject name in Russian plural form, for example:
   Брюки, Шорты, Джинсы, Футболки, Майки, Рубашки, Блузки, Платья, Юбки, Костюмы.
 - If user hints and image disagree on category, trust user hints and add a warning.
 - If uncertain, add a short warning and lower confidence.
 - Extract only factual product attributes useful for a Wildberries card.
+- Keep fit_type for the product silhouette or cut, for example: широкие, прямые, зауженные, свободные, облегающие, оверсайз.
+- Do not put rise values such as высокая, средняя, низкая into fit_type. Store them in attributes under the Russian key "Тип посадки".
+- For trousers, jeans, shorts and skirts, identify the visible model/silhouette separately from the rise whenever possible.
 
 User hints:
 {hints_text}
