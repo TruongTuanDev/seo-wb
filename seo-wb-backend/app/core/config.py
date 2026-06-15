@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     rabbitmq_password: str | None = None
     rabbitmq_vhost: str | None = None
     rabbitmq_ssl: bool = False
+    rabbitmq_prefetch_count: int = 1
+    rabbitmq_processing_lock_seconds: int = 3600
+    rabbitmq_idempotency_ttl_seconds: int = 86400
+    rabbitmq_failed_idempotency_ttl_seconds: int = 900
 
     cloudinary_cloud_name: str | None = None
     cloudinary_api_key: str | None = None

@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timezone
 import pika
 from app.core.config import Settings
+from app.services.rabbitmq_topology import declare_sync_topology
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ def publish_sync_job(settings: Settings, job_type: str, store_id: int, payload: 
     connection = pika.BlockingConnection(params)
     try:
         channel = connection.channel()
+        declare_sync_topology(channel)
         
         job_id = f"{job_type}-{int(datetime.now(timezone.utc).timestamp())}"
         sync_job = {

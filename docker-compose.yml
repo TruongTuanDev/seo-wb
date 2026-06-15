@@ -11,6 +11,21 @@ services:
       timeout: 5s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-sellerwb}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-sellerwb}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-sellerwb}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   db:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -40,6 +55,10 @@ services:
     environment:
       - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
       - REDIS_HOST=redis
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USERNAME=${RABBITMQ_USERNAME:-sellerwb}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-sellerwb}
+      - RABBITMQ_VHOST=${RABBITMQ_VHOST:-sellerwb}
     volumes:
       - ./seo-wb-backend/storage:/app/storage
     command: sh -c "python ./scripts/migrate.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"
@@ -47,6 +66,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   worker:
@@ -69,6 +90,33 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+
+  sync-worker:
+    build:
+      context: ./seo-wb-backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.wb_sync_worker"]
+    env_file:
+      - ./seo-wb-backend/.env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
+      - REDIS_HOST=redis
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USERNAME=${RABBITMQ_USERNAME:-sellerwb}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-sellerwb}
+      - RABBITMQ_VHOST=${RABBITMQ_VHOST:-sellerwb}
+    volumes:
+      - ./seo-wb-backend/storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      backend:
+        condition: service_started
 
   finance-worker:
     build:
@@ -139,3 +187,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  rabbitmq_data:

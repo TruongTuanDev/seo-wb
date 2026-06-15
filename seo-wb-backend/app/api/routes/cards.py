@@ -361,7 +361,21 @@ async def enqueue_card_job(
     db.commit()
     db.refresh(job)
 
-    await asyncio.to_thread(publish_sync_job, settings, "card.push", store_id, {"job_id": job.id})
+    try:
+        await asyncio.to_thread(publish_sync_job, settings, "card.push", store_id, {"job_id": job.id})
+    except Exception as exc:
+        job.status = "failed"
+        job.step = "queueing_failed"
+        job.error = "Card publishing queue is temporarily unavailable."
+        if draft_id is not None:
+            draft = _get_owned_draft(db, user, draft_id)
+            draft.status = "needs_user_fix"
+        db.commit()
+        raise AppError(
+            "card_queue_unavailable",
+            "Card publishing service is temporarily unavailable. Please try again.",
+            503,
+        ) from exc
     return _job_response(job)
 
 

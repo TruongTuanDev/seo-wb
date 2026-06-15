@@ -75,8 +75,9 @@ async function fetchWithAuth(url: string, options: ApiOptions = {}) {
       window.location.href = "/login";
     }
     let errorMsg = "An error occurred";
+    const responseText = await response.text();
     try {
-      const errorData = await response.json();
+      const errorData = JSON.parse(responseText);
       errorMsg = formatApiError(
         errorData?.error?.message ||
         errorData?.detail?.message ||
@@ -92,7 +93,7 @@ async function fetchWithAuth(url: string, options: ApiOptions = {}) {
         }
       }
     } catch {
-      errorMsg = await response.text() || response.statusText;
+      errorMsg = responseText || response.statusText;
     }
     throw new Error(errorMsg);
   }
