@@ -7,7 +7,7 @@ from app.core.config import Settings
 from app.core.errors import AppError
 from app.services.billing_foundation import IMAGE_JOB_QUEUE_HIGH, IMAGE_JOB_QUEUE_LOW, IMAGE_JOB_QUEUE_NORMAL
 from app.services.product_image_generator import IMAGE_JOB_QUEUE_KEY, ProductImageGenerator
-from app.workers.image_generation_worker import pop_next_image_job
+from app.workers.image_generation_worker import IMAGE_JOB_PROCESSING_QUEUE, pop_next_image_job, recover_abandoned_jobs
 from app.services.product_image_prompt_builder import build_product_image_prompt, product_family
 
 
@@ -16,6 +16,7 @@ class FakeRedis:
         self.values = {}
         self.queue = []
         self.locks = set()
+        self.zsets = {}
 
     async def set(self, key, value, nx=False, ex=None):
         if nx and key in self.values:
@@ -40,6 +41,35 @@ class FakeRedis:
     async def delete(self, key):
         self.values.pop(key, None)
         return 1
+
+    async def expire(self, key, seconds):
+        return key in self.values
+
+    async def lmove(self, source, destination, wherefrom, whereto):
+        value = await self.lpop(source)
+        if value is not None:
+            self.queue.append((destination, value))
+        return value
+
+    async def lrem(self, key, count, value):
+        before = len(self.queue)
+        self.queue = [(queue_name, item) for queue_name, item in self.queue if not (queue_name == key and item == value)]
+        return before - len(self.queue)
+
+    async def lrange(self, key, start, end):
+        return [value for queue_name, value in self.queue if queue_name == key]
+
+    async def eval(self, script, numkeys, key, now, limit, expires_at, token, ttl):
+        members = self.zsets.setdefault(key, {})
+        members = {item: score for item, score in members.items() if score > float(now)}
+        self.zsets[key] = members
+        if len(members) >= int(limit):
+            return 0
+        members[token] = float(expires_at)
+        return 1
+
+    async def zrem(self, key, token):
+        return self.zsets.setdefault(key, {}).pop(token, None) is not None
 
 
 def _image_bytes() -> bytes:
@@ -86,7 +116,7 @@ async def test_create_job_enqueues_and_sets_per_card_lock():
 
     job = await generator.create_job(
         user_id=1,
-        store_id=2,
+        store_id=3,
         draft_id=3,
         variant_id="variant-1",
         variant_index=0,
@@ -138,7 +168,7 @@ async def test_create_job_routes_to_requested_priority_queue():
     )
     free_job = await generator.create_job(
         user_id=2,
-        store_id=2,
+        store_id=3,
         draft_id=4,
         variant_id="variant-2",
         variant_index=0,
@@ -155,6 +185,47 @@ async def test_create_job_routes_to_requested_priority_queue():
 
 
 @pytest.mark.anyio
+async def test_create_job_allows_different_shops_but_blocks_same_shop():
+    redis = FakeRedis()
+    generator = ProductImageGenerator(_settings(), redis)
+
+    await generator.create_job(
+        user_id=1,
+        store_id=10,
+        draft_id=1,
+        variant_id="variant-a",
+        variant_index=0,
+        quantity=1,
+        metadata={"title": "A"},
+        front_image=_image_bytes(),
+    )
+    await generator.create_job(
+        user_id=1,
+        store_id=11,
+        draft_id=2,
+        variant_id="variant-b",
+        variant_index=0,
+        quantity=1,
+        metadata={"title": "B"},
+        front_image=_image_bytes(),
+    )
+
+    with pytest.raises(AppError) as exc_info:
+        await generator.create_job(
+            user_id=2,
+            store_id=10,
+            draft_id=3,
+            variant_id="variant-c",
+            variant_index=0,
+            quantity=1,
+            metadata={"title": "C"},
+            front_image=_image_bytes(),
+        )
+
+    assert exc_info.value.code == "store_image_generation_already_running"
+
+
+@pytest.mark.anyio
 async def test_worker_priority_pop_prefers_high_then_normal_then_low():
     redis = FakeRedis()
     await redis.rpush(IMAGE_JOB_QUEUE_LOW, "low-job")
@@ -168,6 +239,24 @@ async def test_worker_priority_pop_prefers_high_then_normal_then_low():
     assert first == (IMAGE_JOB_QUEUE_HIGH, "high-job")
     assert second == (IMAGE_JOB_QUEUE_NORMAL, "normal-job")
     assert third == (IMAGE_JOB_QUEUE_LOW, "low-job")
+
+
+@pytest.mark.anyio
+async def test_worker_recovers_abandoned_processing_job():
+    redis = FakeRedis()
+    state = {
+        "id": "abandoned-job",
+        "status": "processing",
+        "step": "generating_front",
+        "queue_name": IMAGE_JOB_QUEUE_NORMAL,
+    }
+    await redis.set("image_generation_job:abandoned-job", __import__("json").dumps(state))
+    await redis.rpush(IMAGE_JOB_PROCESSING_QUEUE, "abandoned-job")
+
+    recovered = await recover_abandoned_jobs(redis)
+
+    assert recovered == 1
+    assert (IMAGE_JOB_QUEUE_NORMAL, "abandoned-job") in redis.queue
 
 
 @pytest.mark.anyio

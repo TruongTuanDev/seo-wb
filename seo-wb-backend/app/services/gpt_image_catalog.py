@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from time import monotonic
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from app.core.errors import AppError
 from app.services.image_storage import ImageStorage
 from app.services.gpt_prompt_builder import GPTPromptBuilder
 from app.services.garment_validator import GarmentValidator
+from app.services.image_concurrency import DistributedImageApiLimiter, is_retryable_openai_error
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +191,14 @@ def build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str, 
 
 
 class GPTImageCatalogService:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, redis=None):
         self._settings = settings
         self._storage = ImageStorage(settings)
+        self._api_limiter = DistributedImageApiLimiter(
+            redis,
+            limit=settings.image_global_concurrency,
+            lease_seconds=settings.image_api_slot_lease_seconds,
+        )
 
     async def run_gpt_image_job(
         self,
@@ -415,6 +422,7 @@ class GPTImageCatalogService:
             async def run_initial_task(idx: int, task: dict[str, Any]) -> dict[str, Any]:
                 nonlocal seller_warning
                 async with semaphore:
+                    started_at = monotonic()
                     pose = task["pose"]
                     task_type = task["type"]
                     label = task["label"]
@@ -524,6 +532,14 @@ class GPTImageCatalogService:
                         retry_priority=priority,
                         retry_prompt=None,
                         prompt=prompt
+                    )
+                    logger.info(
+                        "Generated catalog image job=%s label=%s pose=%s duration_seconds=%.2f quality_check=%s",
+                        job_id,
+                        label,
+                        pose,
+                        monotonic() - started_at,
+                        quality_check_enabled,
                     )
 
                     return {
@@ -764,11 +780,19 @@ class GPTImageCatalogService:
         import random
         for attempt in range(attempts):
             try:
-                return await asyncio.to_thread(self._generate_with_openai, image_paths, prompt, job_model)
-            except retryable_errors:
-                if attempt >= attempts - 1:
+                async with self._api_limiter.slot():
+                    return await asyncio.to_thread(self._generate_with_openai, image_paths, prompt, job_model)
+            except Exception as exc:
+                if attempt >= attempts - 1 or not is_retryable_openai_error(exc):
                     raise
                 delay = min(2 ** attempt, 12) + random.uniform(0, 0.75)
+                logger.warning(
+                    "Retrying GPT image call attempt=%d/%d delay_seconds=%.2f error=%s",
+                    attempt + 1,
+                    attempts - 1,
+                    delay,
+                    str(exc)[:300],
+                )
                 await asyncio.sleep(delay)
         raise RuntimeError("OpenAI image generation retry loop exited unexpectedly.")
 

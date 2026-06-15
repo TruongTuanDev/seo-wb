@@ -90,6 +90,12 @@ class Settings(BaseSettings):
     max_background_jobs: int = 2
     openai_image_concurrency: int = 2
     openai_image_retry_attempts: int = 3
+    image_worker_concurrency: int = 2
+    image_global_concurrency: int = 6
+    image_api_slot_lease_seconds: int = 600
+    image_job_lease_seconds: int = 3600
+    image_job_recovery_interval_seconds: int = 60
+    max_active_order_per_store: int = 1
     enable_image_validation_retry: bool = False
     image_generation_lock_ttl_seconds: int = 1800
 

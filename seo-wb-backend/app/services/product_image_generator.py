@@ -1,9 +1,11 @@
 import asyncio
 import base64
 import json
+import logging
 import random
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic
 from typing import Any
 from uuid import uuid4
 
@@ -23,11 +25,13 @@ from app.services.billing_foundation import (
     record_credit_transaction,
 )
 from app.services.image_storage import ImageStorage
+from app.services.image_concurrency import DistributedImageApiLimiter, is_retryable_openai_error
 from app.services.product_image_prompt_builder import build_product_image_prompt
 
 
 IMAGE_JOB_STORAGE_DIR = Path("storage/image_jobs")
 IMAGE_JOB_QUEUE_KEY = IMAGE_JOB_QUEUE_NORMAL
+logger = logging.getLogger(__name__)
 
 
 class ProductImageGenerator:
@@ -35,6 +39,11 @@ class ProductImageGenerator:
         self._settings = settings
         self._redis = redis
         self._storage = ImageStorage(settings)
+        self._api_limiter = DistributedImageApiLimiter(
+            redis,
+            limit=settings.image_global_concurrency,
+            lease_seconds=settings.image_api_slot_lease_seconds,
+        )
 
     async def create_job(
         self,
@@ -60,10 +69,27 @@ class ProductImageGenerator:
         elif job_type in {"openai", "gpt_image_openai", "gpt_image"} and not self._settings.openai_api_key:
             raise AppError("missing_openai_key", "OPENAI_API_KEY is missing.", 500)
 
+        lock_ttl = max(self._settings.image_generation_lock_ttl_seconds, self._settings.image_job_lease_seconds * 2)
         lock_key = self._lock_key(user_id, draft_id, variant_id)
-        locked = await self._redis.set(lock_key, "1", nx=True, ex=self._settings.image_generation_lock_ttl_seconds)
+        locked = await self._redis.set(lock_key, "1", nx=True, ex=lock_ttl)
         if not locked:
             raise AppError("image_generation_already_running", "Image generation is already running for this card.", 409)
+        store_lock_key = self._store_lock_key(store_id)
+        store_locked = True
+        if self._settings.max_active_order_per_store > 0:
+            store_locked = await self._redis.set(
+                store_lock_key,
+                "1",
+                nx=True,
+                ex=lock_ttl,
+            )
+        if not store_locked:
+            await self._redis.delete(lock_key)
+            raise AppError(
+                "store_image_generation_already_running",
+                "Bạn đang có ảnh được tạo cho shop này, vui lòng đợi hoàn tất.",
+                409,
+            )
 
         job_id = uuid4().hex
         total = max(1, min(quantity, self._settings.max_ai_product_images))
@@ -93,6 +119,7 @@ class ProductImageGenerator:
                 "variant_id": variant_id,
                 "variant_index": variant_index,
                 "lock_key": lock_key,
+                "store_lock_key": store_lock_key if self._settings.max_active_order_per_store > 0 else None,
                 "status": "queued",
                 "step": "queued",
                 "progress": 0,
@@ -121,6 +148,8 @@ class ProductImageGenerator:
             return self._public_state(state)
         except Exception:
             await self._redis.delete(lock_key)
+            if self._settings.max_active_order_per_store > 0:
+                await self._redis.delete(store_lock_key)
             raise
 
     async def get_job(self, job_id: str, user_id: int) -> dict[str, Any]:
@@ -328,7 +357,8 @@ class ProductImageGenerator:
         state = await self._load_state(job_id)
         if not state:
             raise AppError("image_job_not_found", "Image generation job was not found.", 404)
-        if state.get("status") == "completed":
+        if state.get("status") in {"completed", "completed_with_warnings", "failed", "failed_validation"}:
+            await self._release_job_locks(state)
             return self._public_state(state)
 
         if state.get("job_type") == "try_on":
@@ -356,7 +386,7 @@ class ProductImageGenerator:
         if state.get("job_type") in {"gpt_image", "gpt_image_openai"}:
             from app.services.gpt_image_catalog import GPTImageCatalogService
             self._update_job_record(db, state)
-            service = GPTImageCatalogService(self._settings)
+            service = GPTImageCatalogService(self._settings, self._redis)
             try:
                 result = await service.run_gpt_image_job(
                     job_id=job_id,
@@ -375,6 +405,9 @@ class ProductImageGenerator:
                 lock_key = state.get("lock_key")
                 if lock_key:
                     await self._redis.delete(str(lock_key))
+                store_lock_key = state.get("store_lock_key")
+                if store_lock_key:
+                    await self._redis.delete(str(store_lock_key))
 
         try:
             state["status"] = "processing"
@@ -391,6 +424,7 @@ class ProductImageGenerator:
 
             async def generate_index(index: int) -> tuple[int, dict[str, Any]]:
                 async with semaphore:
+                    started_at = monotonic()
                     prompt = build_product_image_prompt(metadata, index, total, has_model_reference)
                     content = await self._generate_one_with_retry(job_id, prompt, has_model_reference)
                     file_name = f"generated-{index + 1:02d}.jpg"
@@ -402,7 +436,7 @@ class ProductImageGenerator:
                         content=content,
                         local_path=output_path,
                     )
-                    return index, {
+                    item = {
                         "fileName": file_name,
                         "url": storage_result["url"],
                         "storage": storage_result["storage"],
@@ -412,6 +446,13 @@ class ProductImageGenerator:
                         "height": storage_result.get("height"),
                         "prompt": prompt,
                     }
+                    logger.info(
+                        "Generated image job=%s image_index=%d duration_seconds=%.2f",
+                        job_id,
+                        index,
+                        monotonic() - started_at,
+                    )
+                    return index, item
 
             tasks = [asyncio.create_task(generate_index(index)) for index in range(total)]
             for completed in asyncio.as_completed(tasks):
@@ -446,6 +487,9 @@ class ProductImageGenerator:
             lock_key = state.get("lock_key")
             if lock_key:
                 await self._redis.delete(str(lock_key))
+            store_lock_key = state.get("store_lock_key")
+            if store_lock_key:
+                await self._redis.delete(str(store_lock_key))
 
     async def _generate_one_with_retry(self, job_id: str, prompt: str, has_model_reference: bool) -> bytes:
         state = await self._load_state(job_id)
@@ -456,11 +500,20 @@ class ProductImageGenerator:
         retryable_errors = (RateLimitError, APIConnectionError, APITimeoutError)
         for attempt in range(attempts):
             try:
-                return await asyncio.to_thread(self._generate_one, job_id, prompt, has_model_reference, model)
-            except retryable_errors:
-                if attempt >= attempts - 1:
+                async with self._api_limiter.slot():
+                    return await asyncio.to_thread(self._generate_one, job_id, prompt, has_model_reference, model)
+            except Exception as exc:
+                if attempt >= attempts - 1 or not is_retryable_openai_error(exc):
                     raise
                 delay = min(2 ** attempt, 12) + random.uniform(0, 0.75)
+                logger.warning(
+                    "Retrying OpenAI image job=%s attempt=%d/%d delay_seconds=%.2f error=%s",
+                    job_id,
+                    attempt + 1,
+                    attempts - 1,
+                    delay,
+                    str(exc)[:300],
+                )
                 await asyncio.sleep(delay)
         raise RuntimeError("OpenAI image generation retry loop exited unexpectedly.")
 
@@ -551,6 +604,11 @@ class ProductImageGenerator:
     async def _save_state(self, job_id: str, state: dict[str, Any]) -> None:
         await self._redis.set(self._key(job_id), json.dumps(state, ensure_ascii=False), ex=60 * 60 * 24)
 
+    async def _release_job_locks(self, state: dict[str, Any]) -> None:
+        for key_name in ("lock_key", "store_lock_key"):
+            if state.get(key_name):
+                await self._redis.delete(str(state[key_name]))
+
     async def _load_state(self, job_id: str) -> dict[str, Any] | None:
         raw = await self._redis.get(self._key(job_id))
         if not raw:
@@ -587,6 +645,10 @@ class ProductImageGenerator:
     @staticmethod
     def _lock_key(user_id: int, draft_id: int, variant_id: str) -> str:
         return f"image_generation_lock:{user_id}:{draft_id}:{variant_id}"
+
+    @staticmethod
+    def _store_lock_key(store_id: int) -> str:
+        return f"image_generation_store_lock:{store_id}"
 
     def _persist_job_record(self, db: Session, state: dict[str, Any]) -> None:
         if db is None:
