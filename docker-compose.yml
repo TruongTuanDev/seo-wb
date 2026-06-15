@@ -1,4 +1,16 @@
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   db:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -27,11 +39,14 @@ services:
       - ./seo-wb-backend/.env
     environment:
       - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
+      - REDIS_HOST=redis
     volumes:
       - ./seo-wb-backend/storage:/app/storage
     command: sh -c "python ./scripts/migrate.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   worker:
@@ -44,6 +59,7 @@ services:
       - ./seo-wb-backend/.env
     environment:
       - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
+      - REDIS_HOST=redis
     volumes:
       - ./seo-wb-backend/storage:/app/storage
     depends_on:
@@ -51,6 +67,8 @@ services:
         condition: service_healthy
       backend:
         condition: service_started
+      redis:
+        condition: service_healthy
 
   finance-worker:
     build:
@@ -62,11 +80,14 @@ services:
       - ./seo-wb-backend/.env
     environment:
       - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
+      - REDIS_HOST=redis
     depends_on:
       db:
         condition: service_healthy
       backend:
         condition: service_started
+      redis:
+        condition: service_healthy
 
   finance-scheduler:
     build:
@@ -78,11 +99,14 @@ services:
       - ./seo-wb-backend/.env
     environment:
       - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
+      - REDIS_HOST=redis
     depends_on:
       db:
         condition: service_healthy
       backend:
         condition: service_started
+      redis:
+        condition: service_healthy
 
   usage-reset-scheduler:
     build:
@@ -114,3 +138,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
