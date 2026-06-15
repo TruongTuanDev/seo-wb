@@ -18,6 +18,28 @@ logger = logging.getLogger(__name__)
 IMAGE_JOB_STORAGE_DIR = Path("storage/image_jobs")
 
 
+class _SkippedGarmentValidator:
+    def validate_image(self, *_args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "passed": True,
+            "score": 1.0,
+            "validation_score": 100,
+            "realism_score": 100,
+            "validation_threshold": kwargs.get("validation_threshold", 85),
+            "realism_threshold": kwargs.get("realism_threshold", 80),
+            "realism_issues": [],
+            "issues": [],
+            "warnings": [],
+            "failed_fields": [],
+            "missing_details": [],
+            "critical_mismatch": False,
+            "wrong_garment_type": False,
+            "wrong_garment_area": False,
+            "missing_core_identity": False,
+            "validation_skipped": True,
+        }
+
+
 def _classify_validation_result(val_res: dict[str, Any], retry_used: bool) -> dict[str, Any]:
     validation_score = int(val_res.get("validation_score", round(float(val_res.get("score", 0.0)) * 100)))
     critical_mismatch = bool(val_res.get("critical_mismatch"))
@@ -199,6 +221,8 @@ class GPTImageCatalogService:
             validation_threshold = int(runtime_config.get("validation_threshold", 85))
             realism_threshold = int(runtime_config.get("realism_threshold", 80))
             validation_failure_behavior = str(runtime_config.get("validation_failure_behavior") or "warn").lower()
+            quality_check_enabled = bool(metadata.get("quality_check_enabled", True))
+            state["quality_check_enabled"] = quality_check_enabled
             job_model = metadata.get("model")
             if job_model:
                 is_explicit = job_model in {"gpt-image-1", "dall-e-2"}
@@ -237,9 +261,9 @@ class GPTImageCatalogService:
             state["total"] = len(tasks_to_run)
             await save_state_fn(job_id, state)
 
-            # Every bundle gets at most one quality retry, regardless of size.
+            # Quality mode gets at most one repair call; fast mode returns images without validation.
             quantity = len(tasks_to_run)
-            max_openai_calls = quantity + 1
+            max_openai_calls = quantity + (1 if quality_check_enabled else 0)
 
             openai_calls_count = 0
             initial_generation_calls = 0
@@ -273,7 +297,7 @@ class GPTImageCatalogService:
             approved_items = {}
             progress_lock = asyncio.Lock()
             semaphore = asyncio.Semaphore(3)
-            validator = GarmentValidator(self._settings)
+            validator = GarmentValidator(self._settings) if quality_check_enabled else _SkippedGarmentValidator()
             seller_warning = None
 
             async def save_image_item(
@@ -488,7 +512,7 @@ class GPTImageCatalogService:
                     realism_score = val_res.get("realism_score", 100)
                     is_unrealistic = realism_score < realism_threshold
                     is_inconsistent = not val_res["passed"]
-                    needs_retry = is_unrealistic or is_inconsistent
+                    needs_retry = quality_check_enabled and (is_unrealistic or is_inconsistent)
 
                     await save_image_item(
                         idx=idx,
@@ -684,6 +708,7 @@ class GPTImageCatalogService:
             has_warnings = summary["warning_count"] > 0 or summary["review_required_count"] > 0 or has_failed
             state["validation_summary"] = summary
             state["seller_warning"] = seller_warning
+            state["validation_skipped"] = not quality_check_enabled
             state["final_validation_status"] = "failed" if has_failed else "review_required" if summary["review_required_count"] > 0 else "warning" if summary["warning_count"] > 0 else "approved"
 
             openai_calls_metadata = {

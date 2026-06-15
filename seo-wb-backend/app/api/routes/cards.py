@@ -785,6 +785,8 @@ async def enqueue_gpt_image_openai_job(
     modelImage: UploadFile | None = File(default=None),
     autoGenerateModel: bool = Form(default=False),
     model: str | None = Form(default=None),
+    variantColor: str | None = Form(default=None),
+    enableQualityCheck: bool = Form(default=True),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
     user: User = Depends(get_current_user),
@@ -848,12 +850,22 @@ async def enqueue_gpt_image_openai_job(
             category=analysis.get("category"),
             gender=selectedModelGender or analysis.get("gender") or "female"
         )
-        analysis_copy = dict(analysis)
-        analysis_copy["garment_json"] = garment_json
-        analysis_copy["garment_area"] = garment_json.get("garment_area")
-        draft.analysis = analysis_copy
         draft.garment_json = garment_json
-        db.commit()
+
+    from app.services.garment_analyzer import build_variant_color_garment_json
+    garment_json = build_variant_color_garment_json(
+        garment_json,
+        front_image_bytes=front_bytes,
+        variant_color=variantColor,
+    )
+    analysis_copy = dict(analysis)
+    analysis_copy["garment_json"] = _draft_garment_json(draft) or garment_json
+    analysis_copy["garment_area"] = garment_json.get("garment_area")
+    variant_garment_json = dict(analysis_copy.get("variant_garment_json") or {})
+    variant_garment_json[str(variant_index)] = garment_json
+    analysis_copy["variant_garment_json"] = variant_garment_json
+    draft.analysis = analysis_copy
+    db.commit()
 
     metadata = {
         "title": draft.vendor_code or "garment",
@@ -869,6 +881,9 @@ async def enqueue_gpt_image_openai_job(
         "runtime_config": runtime_config,
         "auto_model_generation": auto_model_generation,
         "output_type": "catalog_bundle",
+        "quality_check_enabled": enableQualityCheck,
+        "variant_color": variantColor or garment_json.get("main_color") or "",
+        "variant_color_analysis_mode": "fast_local_color_signature",
     }
     metadata["model"] = model or runtime_config["default_image_model"]
 

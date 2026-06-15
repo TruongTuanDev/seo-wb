@@ -201,6 +201,7 @@ class ImageGenerationJobResponse(BaseModel):
     seller_warning: str | None = None
     final_validation_status: str | None = None
     validation_summary: dict[str, Any] | None = None
+    quality_check_enabled: bool | None = None
 
 
 class ImageGenerationImageActionRequest(BaseModel):

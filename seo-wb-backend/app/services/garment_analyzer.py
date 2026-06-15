@@ -1,7 +1,9 @@
 import json
 import logging
 import os
+import re
 import time
+from copy import deepcopy
 from io import BytesIO
 from typing import Any
 from PIL import Image, UnidentifiedImageError
@@ -437,6 +439,59 @@ def _merge_rules(existing: list[str], additions: list[str]) -> list[str]:
         if text and text not in merged:
             merged.append(text)
     return merged
+
+
+def build_variant_color_garment_json(
+    base_garment_json: dict[str, Any],
+    front_image_bytes: bytes,
+    variant_color: str | None = None,
+) -> dict[str, Any]:
+    """Overlay a real variant's color signature without re-analyzing its structure."""
+    garment_json = deepcopy(base_garment_json or {})
+    signature = extract_color_signature(front_image_bytes, garment_json.get("garment_area"))
+    semantic_color = str(variant_color or "").split(";")[0].strip() or signature.dominant_name
+
+    old_color_terms = _collect_old_color_terms(garment_json)
+    garment_json = _replace_old_color_text(garment_json, old_color_terms, semantic_color)
+    garment_json["main_color"] = semantic_color
+    garment_json["secondary_color"] = signature.palette_hex[1] if len(signature.palette_hex) > 1 else ""
+    garment_json["secondary_colors"] = signature.palette_hex[1:]
+    garment_json["color_palette"] = signature.palette_hex
+    garment_json["variant_color_signature"] = {
+        "dominant_hex": signature.dominant_hex,
+        "dominant_name": signature.dominant_name,
+        "palette_hex": signature.palette_hex,
+        "analysis_mode": "fast_local_color_signature",
+    }
+    return garment_json
+
+
+def _collect_old_color_terms(garment_json: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    placeholders = {"none", "unknown", "n/a", "na", "not specified", "unspecified"}
+    for field in ("main_color", "secondary_color"):
+        value = str(garment_json.get(field) or "").strip()
+        if value and not value.startswith("#") and value.lower() not in placeholders:
+            values.append(value)
+    for value in garment_json.get("secondary_colors") or []:
+        text = str(value or "").strip()
+        if text and not text.startswith("#") and text.lower() not in placeholders:
+            values.append(text)
+    return sorted(set(values), key=len, reverse=True)
+
+
+def _replace_old_color_text(value: Any, old_terms: list[str], replacement: str) -> Any:
+    if isinstance(value, dict):
+        return {key: _replace_old_color_text(item, old_terms, replacement) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_old_color_text(item, old_terms, replacement) for item in value]
+    if not isinstance(value, str):
+        return value
+
+    result = value
+    for term in old_terms:
+        result = re.sub(rf"\b{re.escape(term)}\b", replacement, result, flags=re.IGNORECASE)
+    return result
 
 
 def _is_complex_product(garment_json: dict[str, Any]) -> bool:

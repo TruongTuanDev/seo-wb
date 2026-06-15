@@ -108,6 +108,7 @@ interface ImageGenerationJob {
   seller_warning?: string | null;
   final_validation_status?: ImageGenerationStatus["final_validation_status"];
   validation_summary?: ImageGenerationStatus["validation_summary"];
+  quality_check_enabled?: boolean | null;
 }
 
 function getErrorMessage(err: unknown) {
@@ -265,6 +266,7 @@ export function CreateCardClient() {
   const { job } = useJobStatus(jobId);
   const [imageGenerationJobs, setImageGenerationJobs] = useState<Record<string, ImageGenerationJob>>({});
   const completedImageJobsRef = React.useRef<Set<string>>(new Set());
+  const appendedGeneratedImagesRef = React.useRef<Set<string>>(new Set());
   const [recommendations, setRecommendations] = useState<RecommendationPayload | null>(null);
 
   useEffect(() => {
@@ -783,6 +785,7 @@ export function CreateCardClient() {
       garmentType?: string;
       imageModel?: string;
       autoGenerateModel?: boolean;
+      enableQualityCheck?: boolean;
     }
   ) => {
     if (!draftId) {
@@ -808,6 +811,8 @@ export function CreateCardClient() {
       formData.append("selectedModelBodyType", input.selectedModelBodyType || "");
       formData.append("style", input.backgroundStyle || "studio");
       formData.append("autoGenerateModel", input.autoGenerateModel ? "true" : "false");
+      formData.append("enableQualityCheck", input.enableQualityCheck === false ? "false" : "true");
+      formData.append("variantColor", variant.color || findCharacteristicValue(variant.characteristics, ["Цвет", "color"]));
       formData.append("productFrontImage", input.frontImage);
       if (input.backImage) {
         formData.append("productBackImage", input.backImage);
@@ -900,26 +905,38 @@ export function CreateCardClient() {
   }, [draftId, imageGenerationJobs]);
 
   useEffect(() => {
-    const completedJobs = Object.values(imageGenerationJobs).filter(
-      (imageJob) => ["completed", "completed_with_warnings"].includes(imageJob.status) && !completedImageJobsRef.current.has(imageJob.id)
-    );
-    if (!completedJobs.length) return;
+    Object.values(imageGenerationJobs).forEach((imageJob) => {
+      const isComplete = ["completed", "completed_with_warnings"].includes(imageJob.status);
+      if (imageJob.quality_check_enabled !== false && !isComplete) return;
+      const pendingImages = (imageJob.images || []).filter((item, index) => {
+        const key = `${imageJob.id}:${item.image_id || item.url || index}`;
+        if (appendedGeneratedImagesRef.current.has(key)) return false;
+        appendedGeneratedImagesRef.current.add(key);
+        return true;
+      });
+      if (!pendingImages.length || !imageJob.variant_id) return;
 
-    completedJobs.forEach((imageJob) => {
-      completedImageJobsRef.current.add(imageJob.id);
       queueMicrotask(async () => {
         const files = (
           await Promise.all(
-            (imageJob.images || []).map((item, index) =>
+            pendingImages.map((item, index) =>
               fileFromGeneratedUrl(item.url, item.fileName || `generated-${index + 1}.jpg`)
             )
           )
         ).filter((file): file is File => Boolean(file));
         if (files.length && imageJob.variant_id) {
           appendImagesToVariant(imageJob.variant_id, files);
-          success("Generated images added", `${files.length} image(s) added to the product card.`);
         }
       });
+    });
+  }, [imageGenerationJobs]);
+
+  useEffect(() => {
+    Object.values(imageGenerationJobs).forEach((imageJob) => {
+      if (["completed", "completed_with_warnings"].includes(imageJob.status) && !completedImageJobsRef.current.has(imageJob.id)) {
+        completedImageJobsRef.current.add(imageJob.id);
+        success("Image generation completed", `${imageJob.images?.length || 0} image(s) are ready.`);
+      }
     });
   }, [imageGenerationJobs, success]);
 

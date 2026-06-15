@@ -1,5 +1,5 @@
 import pytest
-from app.services.garment_analyzer import resolve_garment_area
+from app.services.garment_analyzer import build_variant_color_garment_json, resolve_garment_area
 from app.services.color_fidelity import compare_color_signatures, extract_color_signature
 from app.services.garment_analyzer import _is_complex_product
 from app.services.gpt_prompt_builder import GPTPromptBuilder
@@ -30,6 +30,37 @@ def test_resolve_garment_area():
 
     # Unknown
     assert resolve_garment_area("random_unmapped_category") is None
+
+
+def test_variant_color_signature_replaces_only_color_data():
+    image = Image.new("RGB", (120, 180), color=(190, 45, 52))
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG")
+    base = {
+        "product_type": "pants",
+        "garment_area": "lower_body",
+        "main_color": "black",
+        "secondary_color": "",
+        "secondary_colors": [],
+        "color_palette": ["#202020"],
+        "material": "linen",
+        "silhouette": "wide leg",
+        "pockets": "two side pockets",
+        "logo_or_text": "none",
+        "front_view": {"description": "black wide-leg pants", "key_details": ["black waistband"]},
+    }
+
+    variant = build_variant_color_garment_json(base, buffer.getvalue(), "Красный")
+
+    assert variant["main_color"] == "Красный"
+    assert variant["color_palette"] != ["#202020"]
+    assert variant["material"] == "linen"
+    assert variant["silhouette"] == "wide leg"
+    assert variant["pockets"] == "two side pockets"
+    assert variant["logo_or_text"] == "none"
+    assert "black" not in variant["front_view"]["description"].lower()
+    assert variant["variant_color_signature"]["analysis_mode"] == "fast_local_color_signature"
+    assert base["main_color"] == "black"
 
 
 def test_gpt_prompt_builder():
@@ -327,6 +358,73 @@ def test_garment_analyzer_fallback(monkeypatch):
     assert "warnings" in res
     assert any("Gemini garment analysis failed, using local fallback analysis" in w for w in res["warnings"])
     assert res["color_palette"]
+
+
+@pytest.mark.anyio
+async def test_fast_image_mode_skips_gemini_and_publishes_partial_state(tmp_path, monkeypatch):
+    settings = Settings(
+        app_env="test",
+        app_secret_key="test-secret-key",
+        openai_api_key="test-openai-key",
+        redis_url="redis://localhost:6379/0",
+        gemini_api_key="test-gemini-key",
+    )
+    monkeypatch.setattr("app.services.gpt_image_catalog.IMAGE_JOB_STORAGE_DIR", tmp_path)
+    service = GPTImageCatalogService(settings)
+
+    image = Image.new("RGB", (32, 48), color=(190, 45, 52))
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG")
+    image_bytes = buffer.getvalue()
+    input_dir = tmp_path / "fast-job" / "input"
+    input_dir.mkdir(parents=True)
+    (input_dir / "front.jpg").write_bytes(image_bytes)
+    (input_dir / "model.jpg").write_bytes(image_bytes)
+
+    calls = []
+
+    async def mock_openai_retry(*_args, **_kwargs):
+        calls.append("openai")
+        return image_bytes
+
+    def fail_if_gemini_runs(*_args, **_kwargs):
+        raise AssertionError("Gemini validator must not run in fast mode")
+
+    monkeypatch.setattr(service, "_generate_with_openai_retry", mock_openai_retry)
+    monkeypatch.setattr(GarmentValidator, "validate_image", fail_if_gemini_runs)
+
+    saved_states = []
+
+    async def save_state(_job_id, state):
+        saved_states.append({
+            "status": state.get("status"),
+            "progress": state.get("progress"),
+            "images": list(state.get("images") or []),
+        })
+
+    result = await service.run_gpt_image_job(
+        job_id="fast-job",
+        db=None,
+        state={
+            "status": "queued",
+            "total": 1,
+            "metadata": {
+                "quality_check_enabled": False,
+                "garment_json": {"product_type": "pants", "garment_area": "lower_body"},
+                "override_tasks": [
+                    {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"}
+                ],
+            },
+        },
+        save_state_fn=save_state,
+        attach_draft_fn=lambda *_args: None,
+        use_openai=True,
+    )
+
+    assert len(calls) == 1
+    assert result["status"] == "completed"
+    assert result["images"][0]["validation_result"]["validation_skipped"] is True
+    assert any(state["status"] == "processing" and len(state["images"]) == 1 for state in saved_states)
 
 
 @pytest.mark.anyio

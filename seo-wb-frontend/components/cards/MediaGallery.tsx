@@ -224,6 +224,7 @@ interface MediaGalleryProps {
     garmentType?: string;
     imageModel?: string;
     autoGenerateModel?: boolean;
+    enableQualityCheck?: boolean;
   }) => void;
   onMoveImage: (fromIndex: number, toIndex: number) => void;
   onRemoveImage: (index: number) => void;
@@ -262,6 +263,7 @@ export function MediaGallery({
   const [selectedModelId, setSelectedModelId] = useState<string>("");
   const backgroundStyle = "studio";
   const [selectedImageModel, setSelectedImageModel] = useState<string>("gpt-image-2");
+  const [enableQualityCheck, setEnableQualityCheck] = useState(true);
   const [customModelImage, setCustomModelImage] = useState<File | null>(null);
   const [modelSource, setModelSource] = useState<"my" | "system" | "upload">("my");
   const [isExporting, setIsExporting] = useState<Record<string, boolean>>({});
@@ -558,6 +560,7 @@ export function MediaGallery({
         productCategory,
         imageModel: selectedImageModel,
         autoGenerateModel: false,
+        enableQualityCheck,
       });
     } else {
       if (!selectedModelId || selectedModelId === "none") {
@@ -586,6 +589,7 @@ export function MediaGallery({
         productCategory,
         imageModel: selectedImageModel,
         autoGenerateModel: false,
+        enableQualityCheck,
       });
     }
     setIsModalOpen(false);
@@ -1094,6 +1098,21 @@ export function MediaGallery({
                   ))}
                 </div>
               </div>
+
+              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-200 bg-white p-4">
+                <input
+                  type="checkbox"
+                  checked={enableQualityCheck}
+                  onChange={(event) => setEnableQualityCheck(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-brand focus:ring-brand"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-zinc-900">Kiểm tra và tự sửa ảnh bằng Gemini</span>
+                  <span className="mt-1 block text-xs leading-relaxed text-zinc-500">
+                    Bật: kiểm tra chất lượng và tự sửa tối đa một ảnh chưa đạt. Tắt: ảnh nào tạo xong sẽ hiện ngay, không chờ kiểm tra.
+                  </span>
+                </span>
+              </label>
 
               {validationError && (
                 <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">

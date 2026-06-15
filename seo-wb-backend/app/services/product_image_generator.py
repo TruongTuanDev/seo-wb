@@ -577,6 +577,7 @@ class ProductImageGenerator:
             "final_validation_status": state.get("final_validation_status"),
             "validation_summary": state.get("validation_summary"),
             "openai_calls_metadata": state.get("openai_calls_metadata"),
+            "quality_check_enabled": state.get("quality_check_enabled"),
         }
 
     @staticmethod
