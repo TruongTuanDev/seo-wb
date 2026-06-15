@@ -39,37 +39,50 @@ SUBSCRIPTION_PLAN_SEEDS = [
         code="free",
         name="Free",
         price=0.0,
-        currency="USD",
-        monthly_credits=30,
-        monthly_quota=30,
-        monthly_cost_limit=5.0,
-        max_images_per_job=4,
+        currency="RUB",
+        monthly_credits=9,
+        monthly_quota=3,
+        monthly_cost_limit=None,
+        max_images_per_job=8,
         allow_legacy_vton=False,
         allow_gpt_image=True,
         priority_queue=False,
     ),
     SubscriptionPlanSeed(
-        code="pro",
-        name="Pro",
-        price=29.0,
-        currency="USD",
-        monthly_credits=500,
-        monthly_quota=500,
-        monthly_cost_limit=50.0,
+        code="basic",
+        name="Basic",
+        price=3000.0,
+        currency="RUB",
+        monthly_credits=60,
+        monthly_quota=10,
+        monthly_cost_limit=None,
         max_images_per_job=8,
         allow_legacy_vton=True,
         allow_gpt_image=True,
         priority_queue=False,
     ),
     SubscriptionPlanSeed(
-        code="agency",
-        name="Agency",
-        price=149.0,
-        currency="USD",
-        monthly_credits=3000,
-        monthly_quota=3000,
-        monthly_cost_limit=300.0,
-        max_images_per_job=12,
+        code="plus",
+        name="Plus",
+        price=5500.0,
+        currency="RUB",
+        monthly_credits=120,
+        monthly_quota=20,
+        monthly_cost_limit=None,
+        max_images_per_job=8,
+        allow_legacy_vton=True,
+        allow_gpt_image=True,
+        priority_queue=True,
+    ),
+    SubscriptionPlanSeed(
+        code="premium",
+        name="Premium",
+        price=8000.0,
+        currency="RUB",
+        monthly_credits=180,
+        monthly_quota=30,
+        monthly_cost_limit=None,
+        max_images_per_job=8,
         allow_legacy_vton=True,
         allow_gpt_image=True,
         priority_queue=True,
@@ -80,14 +93,14 @@ SUBSCRIPTION_PLAN_BY_CODE = {plan.code: plan for plan in SUBSCRIPTION_PLAN_SEEDS
 
 
 def monthly_credits_for_plan(plan_type: str | None) -> int:
-    return SUBSCRIPTION_PLAN_BY_CODE[get_usage_plan(plan_type).plan_type].monthly_credits
+    return get_usage_plan(plan_type).monthly_credits
 
 
 def queue_name_for_plan(plan_type: str | None) -> str:
     normalized = get_usage_plan(plan_type).plan_type
-    if normalized == "agency":
+    if normalized == "premium":
         return IMAGE_JOB_QUEUE_HIGH
-    if normalized == "pro":
+    if normalized in {"basic", "plus"}:
         return IMAGE_JOB_QUEUE_NORMAL
     return IMAGE_JOB_QUEUE_LOW
 

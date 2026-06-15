@@ -125,6 +125,8 @@ def usage_summary(user: Annotated[User, Depends(get_current_user)]) -> UsageSumm
         credit_balance=max(0, int(user.credit_balance or 0)),
         credits_used=max(0, int(user.credits_used or 0)),
         credits_granted=max(0, int(user.credits_granted or 0)),
+        remaining_cards=remaining_quota,
+        remaining_images=max(0, int(user.credit_balance or 0)),
         quota_reset_at=user.quota_reset_at,
         last_quota_reset_at=user.last_quota_reset_at,
     )

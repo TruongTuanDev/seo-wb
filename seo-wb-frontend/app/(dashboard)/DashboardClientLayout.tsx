@@ -11,6 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useStore } from "@/contexts/StoreContext";
 import { LANGUAGES } from "@/lib/translations";
+import { SUPPORT_PHONE } from "@/lib/plans";
 import { cn } from "@/lib/utils";
 
 interface StoreItem {
@@ -149,6 +150,13 @@ export function DashboardClientLayout({ children }: { children: React.ReactNode 
           </div>
 
           {/* Right: combined account dropdown */}
+          <div className="flex items-center gap-3">
+            <a
+              href={`tel:${SUPPORT_PHONE}`}
+              className="hidden rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 lg:inline-flex"
+            >
+              Hỗ trợ: {SUPPORT_PHONE}
+            </a>
           <div ref={accountRef} className="relative">
             <button
               onClick={() => setAccountOpen((v) => !v)}
@@ -298,6 +306,7 @@ export function DashboardClientLayout({ children }: { children: React.ReactNode 
                 </div>
               </div>
             )}
+          </div>
           </div>
         </div>
 

@@ -21,6 +21,7 @@ from app.schemas.admin import (
     AdminLoginRequest,
     AdminUsageSummaryResponse,
     AdminUserCreateRequest,
+    AdminUserQuotaGrantRequest,
     AdminUserResponse,
     AdminUserUpdateRequest,
     GeneratedImageJobDetailResponse,
@@ -32,6 +33,7 @@ from app.schemas.admin import (
 from app.schemas.auth import TokenResponse, UserResponse
 from app.schemas.card import ImageGenerationImageActionRequest
 from app.services.billing_foundation import log_platform_audit
+from app.services.billing_foundation import record_credit_transaction
 from app.services.product_image_generator import IMAGE_JOB_QUEUE_KEY, ProductImageGenerator
 from app.services.redis_client import require_redis
 from app.services.admin_runtime import (
@@ -264,7 +266,29 @@ def update_user(
         user.status = _normalize_status(payload.status)
     if payload.plan_type is not None:
         previous_plan = user.plan_type
-        apply_plan_defaults(user, normalize_plan_type(payload.plan_type))
+        plan = get_usage_plan(normalize_plan_type(payload.plan_type))
+        previous_monthly_quota = max(0, int(user.monthly_quota or 0))
+        previous_credit_balance = max(0, int(user.credit_balance or 0))
+        user.plan_type = plan.plan_type
+        user.monthly_quota = previous_monthly_quota + plan.monthly_quota
+        user.monthly_cost_limit = plan.monthly_cost_limit
+        user.credit_balance = previous_credit_balance + plan.monthly_credits
+        user.credits_granted = max(0, int(user.credits_granted or 0)) + plan.monthly_credits
+        record_credit_transaction(
+            db,
+            user=user,
+            transaction_type="admin_grant",
+            credits=plan.monthly_credits,
+            balance_after=user.credit_balance,
+            description=f"Admin added {plan.name} plan",
+            metadata={
+                "plan_type": plan.plan_type,
+                "admin_id": admin.id,
+                "card_quota_delta": plan.monthly_quota,
+                "previous_monthly_quota": previous_monthly_quota,
+                "previous_credit_balance": previous_credit_balance,
+            },
+        )
         log_platform_audit(
             db,
             action="PLAN_ASSIGNMENT",
@@ -291,6 +315,60 @@ def update_user(
     db.commit()
     db.refresh(user)
     _log_admin_action(db, admin.id, "UPDATE_USER", "user", str(user.id), payload.model_dump(exclude_none=True))
+    return _user_response(user)
+
+
+@router.post("/users/{user_id}/grant-quota", response_model=AdminUserResponse)
+def grant_user_quota(
+    user_id: int,
+    payload: AdminUserQuotaGrantRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+) -> AdminUserResponse:
+    user = db.get(User, user_id)
+    if not user or user.deleted_at is not None:
+        raise AppError("user_not_found", "User not found.", 404)
+    card_delta = max(0, int(payload.card_quota_delta or 0))
+    image_delta = max(0, int(payload.image_credit_delta or 0))
+    if card_delta == 0 and image_delta == 0:
+        raise AppError("empty_quota_grant", "Enter at least one card or image amount to add.", 400)
+    user.monthly_quota = max(0, int(user.monthly_quota or 0)) + card_delta
+    if image_delta:
+        user.credit_balance = max(0, int(user.credit_balance or 0)) + image_delta
+        user.credits_granted = max(0, int(user.credits_granted or 0)) + image_delta
+        record_credit_transaction(
+            db,
+            user=user,
+            transaction_type="admin_grant",
+            credits=image_delta,
+            balance_after=user.credit_balance,
+            description=payload.note or "Admin added image credits",
+            metadata={"admin_id": admin.id, "card_quota_delta": card_delta, "note": payload.note},
+        )
+    log_platform_audit(
+        db,
+        action="MANUAL_QUOTA_GRANT",
+        target_type="user",
+        target_id=str(user.id),
+        metadata={
+            "admin_id": admin.id,
+            "card_quota_delta": card_delta,
+            "image_credit_delta": image_delta,
+            "note": payload.note,
+        },
+        actor_type="admin",
+        actor_id=str(admin.id),
+    )
+    db.commit()
+    db.refresh(user)
+    _log_admin_action(
+        db,
+        admin.id,
+        "MANUAL_QUOTA_GRANT",
+        "user",
+        str(user.id),
+        {"card_quota_delta": card_delta, "image_credit_delta": image_delta, "note": payload.note},
+    )
     return _user_response(user)
 
 
@@ -678,6 +756,8 @@ def _user_response(user: User) -> AdminUserResponse:
         credit_balance=max(0, int(user.credit_balance or 0)),
         credits_used=max(0, int(user.credits_used or 0)),
         credits_granted=max(0, int(user.credits_granted or 0)),
+        remaining_cards=max(0, int(user.monthly_quota or 0) - int(user.used_quota or 0)),
+        remaining_images=max(0, int(user.credit_balance or 0)),
         quota_reset_at=user.quota_reset_at,
         last_quota_reset_at=user.last_quota_reset_at,
         close_to_quota_limit=quota_ratio(user) >= 0.8,

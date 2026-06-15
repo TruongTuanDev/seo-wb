@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/Input";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { useToast } from "@/contexts/ToastContext";
 import { api } from "@/lib/api";
+import { PLAN_OPTIONS, planByCode, planLabel } from "@/lib/plans";
 
 type AdminUser = {
   id: number;
@@ -15,34 +16,31 @@ type AdminUser = {
   status: string;
   plan_type: string;
   max_images_per_job: number;
-  allow_legacy_vton: boolean;
   allow_gpt_image: boolean;
   priority_queue: boolean;
   monthly_quota: number;
   used_quota: number;
-  monthly_cost_limit: number | null;
-  used_cost: number;
   credit_balance: number;
   credits_used: number;
   credits_granted: number;
+  remaining_cards: number;
+  remaining_images: number;
   quota_reset_at: string | null;
-  last_quota_reset_at: string | null;
   close_to_quota_limit: boolean;
-  close_to_cost_limit: boolean;
 };
 
-const emptyForm = { name: "", email: "", password: "", role: "user", plan_type: "free", monthly_quota: "30", monthly_cost_limit: "5" };
+type GrantForm = {
+  cards: string;
+  images: string;
+};
 
-const PLAN_OPTIONS = [
-  { value: "free", label: "Free" },
-  { value: "pro", label: "Pro" },
-  { value: "agency", label: "Agency" },
-];
-
-const PLAN_DEFAULTS: Record<string, { monthly_quota: string; monthly_cost_limit: string }> = {
-  free: { monthly_quota: "30", monthly_cost_limit: "5" },
-  pro: { monthly_quota: "500", monthly_cost_limit: "50" },
-  agency: { monthly_quota: "3000", monthly_cost_limit: "300" },
+const emptyForm = {
+  name: "",
+  email: "",
+  password: "",
+  role: "user",
+  plan_type: "free",
+  monthly_quota: "3",
 };
 
 export default function AdminUsersPage() {
@@ -50,6 +48,8 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(emptyForm);
+  const [grants, setGrants] = useState<Record<number, GrantForm>>({});
+  const [loadingUserId, setLoadingUserId] = useState<number | null>(null);
 
   const load = async () => {
     const query = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
@@ -72,7 +72,7 @@ export default function AdminUsersPage() {
       await api.post("/admin/users", {
         ...form,
         monthly_quota: Number(form.monthly_quota) || 0,
-        monthly_cost_limit: form.monthly_cost_limit.trim() ? Number(form.monthly_cost_limit) : null,
+        monthly_cost_limit: null,
         status: "active",
       });
       setForm(emptyForm);
@@ -93,21 +93,46 @@ export default function AdminUsersPage() {
     }
   };
 
+  const assignPlan = async (user: AdminUser, planType: string) => {
+    const plan = planByCode(planType);
+    try {
+      setLoadingUserId(user.id);
+      await api.put(`/admin/users/${user.id}`, { plan_type: plan.value });
+      await load();
+      success("Plan added", `+${plan.cards} thẻ và +${plan.images} ảnh đã được cộng vào số dư hiện tại.`);
+    } catch (err) {
+      error("Plan update failed", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setLoadingUserId(null);
+    }
+  };
+
+  const grantQuota = async (user: AdminUser) => {
+    const current = grants[user.id] || { cards: "", images: "" };
+    const cards = Number(current.cards) || 0;
+    const images = Number(current.images) || 0;
+    try {
+      setLoadingUserId(user.id);
+      await api.post(`/admin/users/${user.id}/grant-quota`, {
+        card_quota_delta: cards,
+        image_credit_delta: images,
+        note: "Manual admin top-up",
+      });
+      setGrants((state) => ({ ...state, [user.id]: { cards: "", images: "" } }));
+      await load();
+      success("Quota added", `+${cards} thẻ, +${images} ảnh`);
+    } catch (err) {
+      error("Grant failed", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setLoadingUserId(null);
+    }
+  };
+
   const resetQuota = async (userId: number) => {
     try {
       await api.post(`/admin/users/${userId}/reset-quota`);
       await load();
       success("Quota reset");
-    } catch (err) {
-      error("Reset failed", err instanceof Error ? err.message : "Request failed");
-    }
-  };
-
-  const resetCost = async (userId: number) => {
-    try {
-      await api.post(`/admin/users/${userId}/reset-cost`);
-      await load();
-      success("Cost reset");
     } catch (err) {
       error("Reset failed", err instanceof Error ? err.message : "Request failed");
     }
@@ -123,12 +148,10 @@ export default function AdminUsersPage() {
     }
   };
 
-  const quotaTone = (used: number, limit: number) => {
-    if (limit <= 0) return "bg-zinc-200";
-    const ratio = used / limit;
-    if (ratio >= 1) return "bg-rose-500";
-    if (ratio >= 0.8) return "bg-amber-500";
-    return "bg-emerald-500";
+  const quotaTone = (remaining: number) => {
+    if (remaining <= 0) return "text-rose-600 bg-rose-50 border-rose-200";
+    if (remaining <= 2) return "text-amber-700 bg-amber-50 border-amber-200";
+    return "text-emerald-700 bg-emerald-50 border-emerald-200";
   };
 
   const formatDate = (value: string | null) => {
@@ -138,18 +161,17 @@ export default function AdminUsersPage() {
   };
 
   const handlePlanChange = (planType: string) => {
-    const defaults = PLAN_DEFAULTS[planType] ?? PLAN_DEFAULTS.free;
+    const plan = planByCode(planType);
     setForm((state) => ({
       ...state,
-      plan_type: planType,
-      monthly_quota: defaults.monthly_quota,
-      monthly_cost_limit: defaults.monthly_cost_limit,
+      plan_type: plan.value,
+      monthly_quota: String(plan.cards),
     }));
   };
 
   return (
-    <AdminShell title="Users" subtitle="Search, create, suspend, promote, and adjust quotas without leaving the admin workspace.">
-      <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+    <AdminShell title="Users" subtitle="Cấp gói, cộng thêm thẻ và ảnh sau khi khách chuyển tiền. Gói mới luôn cộng dồn vào số dư cũ.">
+      <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
         <section className="rounded-[24px] border border-stone-200 bg-stone-50/80 p-5">
           <h3 className="text-lg font-semibold text-stone-950">Create user</h3>
           <div className="mt-4 space-y-3">
@@ -161,13 +183,26 @@ export default function AdminUsersPage() {
               Plan
               <select className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm" value={form.plan_type} onChange={(e) => handlePlanChange(e.target.value)}>
                 {PLAN_OPTIONS.map((plan) => (
-                  <option key={plan.value} value={plan.value}>{plan.label}</option>
+                  <option key={plan.value} value={plan.value}>
+                    {plan.label} - {plan.cards} thẻ / {plan.images} ảnh
+                  </option>
                 ))}
               </select>
             </label>
-            <Input label="Monthly quota" type="number" value={form.monthly_quota} onChange={(e) => setForm((s) => ({ ...s, monthly_quota: e.target.value }))} />
-            <Input label="Monthly cost limit (optional)" type="number" step="0.01" value={form.monthly_cost_limit} onChange={(e) => setForm((s) => ({ ...s, monthly_cost_limit: e.target.value }))} />
+            <Input label="Card quota" type="number" value={form.monthly_quota} onChange={(e) => setForm((s) => ({ ...s, monthly_quota: e.target.value }))} />
             <Button variant="brand" className="w-full" onClick={createUser}>Create user</Button>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-stone-200 bg-white p-4">
+            <p className="text-sm font-semibold text-stone-900">Active plans</p>
+            <div className="mt-3 space-y-2">
+              {PLAN_OPTIONS.map((plan) => (
+                <div key={plan.value} className="rounded-xl bg-stone-50 px-3 py-2 text-xs text-stone-600">
+                  <div className="font-semibold text-stone-900">{plan.label}: {plan.priceRub.toLocaleString("ru-RU")} ₽</div>
+                  <div>{plan.cards} thẻ, {plan.images} ảnh</div>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -181,148 +216,89 @@ export default function AdminUsersPage() {
               <thead className="bg-stone-50 text-stone-500">
                 <tr>
                   <th className="px-4 py-3">User</th>
-                  <th className="px-4 py-3">Role</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Role / Status</th>
                   <th className="px-4 py-3">Plan</th>
-                  <th className="px-4 py-3">Quota</th>
-                  <th className="px-4 py-3">Cost Limit</th>
-                  <th className="px-4 py-3">Credits</th>
+                  <th className="px-4 py-3">Số dư</th>
+                  <th className="px-4 py-3">Cộng thêm</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
-                  <tr key={user.id} className="border-t border-stone-200">
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-stone-950">{user.name}</div>
-                      <div className="text-stone-500">{user.email}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <input className="w-28 rounded-lg border border-stone-200 px-2 py-1" value={user.role} onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, role: e.target.value } : item))} onBlur={(e) => updateUser(user, { role: e.target.value })} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <select className="rounded-lg border border-stone-200 px-2 py-1" value={user.status} onChange={(e) => updateUser(user, { status: e.target.value })}>
-                        <option value="active">active</option>
-                        <option value="suspended">suspended</option>
-                      </select>
-                    </td>
-                    <td className="px-4 py-3 min-w-[220px]">
-                      <div className="space-y-2">
-                        <select className="w-full rounded-lg border border-stone-200 px-2 py-1" value={user.plan_type} onChange={(e) => updateUser(user, { plan_type: e.target.value })}>
+                {users.map((user) => {
+                  const grant = grants[user.id] || { cards: "", images: "" };
+                  return (
+                    <tr key={user.id} className="border-t border-stone-200 align-top">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-stone-950">{user.name}</div>
+                        <div className="text-stone-500">{user.email}</div>
+                        <div className="mt-1 text-xs text-stone-400">Next reset: {formatDate(user.quota_reset_at)}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="space-y-2">
+                          <input className="w-28 rounded-lg border border-stone-200 px-2 py-1" value={user.role} onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, role: e.target.value } : item))} onBlur={(e) => updateUser(user, { role: e.target.value })} />
+                          <select className="w-28 rounded-lg border border-stone-200 px-2 py-1" value={user.status} onChange={(e) => updateUser(user, { status: e.target.value })}>
+                            <option value="active">active</option>
+                            <option value="suspended">suspended</option>
+                          </select>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 min-w-[220px]">
+                        <select className="w-full rounded-lg border border-stone-200 px-2 py-1" value={planByCode(user.plan_type).value} onChange={(e) => void assignPlan(user, e.target.value)} disabled={loadingUserId === user.id}>
                           {PLAN_OPTIONS.map((plan) => (
                             <option key={plan.value} value={plan.value}>{plan.label}</option>
                           ))}
                         </select>
-                        <div className="text-xs text-stone-500">
-                          Max/job: {user.max_images_per_job} · GPT: {user.allow_gpt_image ? "on" : "off"} · VTON: {user.allow_legacy_vton ? "on" : "off"}
+                        <p className="mt-2 text-xs text-stone-500">
+                          Current: {planLabel(user.plan_type)}. Chọn gói ở đây sẽ cộng thêm quota gói vào số dư hiện tại.
+                        </p>
+                        <p className="mt-1 text-xs text-stone-500">
+                          Max/job: {user.max_images_per_job} · GPT: {user.allow_gpt_image ? "on" : "off"} · Priority: {user.priority_queue ? "yes" : "no"}
+                        </p>
+                      </td>
+                      <td className="px-4 py-3 min-w-[240px]">
+                        <div className="grid gap-2">
+                          <div className={`rounded-2xl border px-3 py-2 ${quotaTone(user.remaining_cards)}`}>
+                            <div className="text-xs uppercase tracking-wide opacity-75">Thẻ còn lại</div>
+                            <div className="text-xl font-semibold">{user.remaining_cards}</div>
+                            <div className="text-xs">Đã dùng {user.used_quota} / tổng {user.monthly_quota}</div>
+                          </div>
+                          <div className={`rounded-2xl border px-3 py-2 ${quotaTone(user.remaining_images)}`}>
+                            <div className="text-xs uppercase tracking-wide opacity-75">Ảnh còn lại</div>
+                            <div className="text-xl font-semibold">{user.remaining_images}</div>
+                            <div className="text-xs">Đã dùng {user.credits_used} / đã cấp {user.credits_granted}</div>
+                          </div>
                         </div>
-                        <div className="text-xs text-stone-500">
-                          Priority queue: {user.priority_queue ? "yes" : "no"} · Next reset: {formatDate(user.quota_reset_at)}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 min-w-[220px]">
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium text-stone-700">
-                          {user.credit_balance} available / {user.credits_granted} granted
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <input
-                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
-                            type="number"
-                            value={user.credit_balance}
-                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, credit_balance: Number(e.target.value) || 0 } : item))}
-                            onBlur={(e) => updateUser(user, { credit_balance: Number(e.target.value) || 0 })}
-                          />
-                          <input
-                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
-                            type="number"
-                            value={user.credits_used}
-                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, credits_used: Number(e.target.value) || 0 } : item))}
-                            onBlur={(e) => updateUser(user, { credits_used: Number(e.target.value) || 0 })}
-                          />
-                          <input
-                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
-                            type="number"
-                            value={user.credits_granted}
-                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, credits_granted: Number(e.target.value) || 0 } : item))}
-                            onBlur={(e) => updateUser(user, { credits_granted: Number(e.target.value) || 0 })}
-                          />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 min-w-[220px]">
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium text-stone-700">{user.used_quota} / {user.monthly_quota}</div>
-                        <div className="h-2 overflow-hidden rounded-full bg-stone-200">
-                          <div
-                            className={`h-full ${quotaTone(user.used_quota, user.monthly_quota)}`}
-                            style={{ width: `${Math.min(100, user.monthly_quota > 0 ? (user.used_quota / user.monthly_quota) * 100 : 0)}%` }}
-                          />
-                        </div>
-                        {user.close_to_quota_limit && <div className="text-xs font-medium text-amber-600">Close to quota limit</div>}
+                      </td>
+                      <td className="px-4 py-3 min-w-[220px]">
                         <div className="grid grid-cols-2 gap-2">
-                          <input
-                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
+                          <Input
+                            label="+ thẻ"
                             type="number"
-                            value={user.monthly_quota}
-                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, monthly_quota: Number(e.target.value) || 0 } : item))}
-                            onBlur={(e) => updateUser(user, { monthly_quota: Number(e.target.value) || 0 })}
+                            min="0"
+                            value={grant.cards}
+                            onChange={(e) => setGrants((state) => ({ ...state, [user.id]: { ...grant, cards: e.target.value } }))}
                           />
-                          <input
-                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
+                          <Input
+                            label="+ ảnh"
                             type="number"
-                            value={user.used_quota}
-                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, used_quota: Number(e.target.value) || 0 } : item))}
-                            onBlur={(e) => updateUser(user, { used_quota: Number(e.target.value) || 0 })}
+                            min="0"
+                            value={grant.images}
+                            onChange={(e) => setGrants((state) => ({ ...state, [user.id]: { ...grant, images: e.target.value } }))}
                           />
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 min-w-[220px]">
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium text-stone-700">
-                          ${user.used_cost.toFixed(2)} / {user.monthly_cost_limit === null ? "unlimited" : `$${user.monthly_cost_limit.toFixed(2)}`}
+                        <Button size="sm" variant="brand" className="mt-2 w-full" onClick={() => void grantQuota(user)} isLoading={loadingUserId === user.id}>
+                          Cộng vào số dư
+                        </Button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-2">
+                          <Button size="sm" variant="outline" onClick={() => resetQuota(user.id)}>Reset cycle</Button>
+                          <Button size="sm" variant="danger" onClick={() => deleteUser(user.id)}>Delete</Button>
                         </div>
-                        {user.monthly_cost_limit !== null && (
-                          <div className="h-2 overflow-hidden rounded-full bg-stone-200">
-                            <div
-                              className={`h-full ${quotaTone(user.used_cost, user.monthly_cost_limit)}`}
-                            style={{ width: `${Math.min(100, user.monthly_cost_limit > 0 ? (user.used_cost / user.monthly_cost_limit) * 100 : 0)}%` }}
-                          />
-                        </div>
-                        )}
-                        {user.close_to_cost_limit && <div className="text-xs font-medium text-amber-600">Close to cost limit</div>}
-                        <div className="grid grid-cols-2 gap-2">
-                          <input
-                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
-                            type="number"
-                            step="0.01"
-                            value={user.monthly_cost_limit ?? ""}
-                            placeholder="Unlimited"
-                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, monthly_cost_limit: e.target.value === "" ? null : Number(e.target.value) } : item))}
-                            onBlur={(e) => updateUser(user, { monthly_cost_limit: e.target.value === "" ? null : Number(e.target.value) })}
-                          />
-                          <input
-                            className="w-full rounded-lg border border-stone-200 px-2 py-1"
-                            type="number"
-                            step="0.01"
-                            value={user.used_cost}
-                            onChange={(e) => setUsers((list) => list.map((item) => item.id === user.id ? { ...item, used_cost: Number(e.target.value) || 0 } : item))}
-                            onBlur={(e) => updateUser(user, { used_cost: Number(e.target.value) || 0 })}
-                          />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-col gap-2">
-                        <Button size="sm" variant="outline" onClick={() => resetQuota(user.id)}>Reset usage</Button>
-                        <Button size="sm" variant="outline" onClick={() => resetCost(user.id)}>Reset cost</Button>
-                        <Button size="sm" variant="danger" onClick={() => deleteUser(user.id)}>Delete</Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

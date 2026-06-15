@@ -68,7 +68,7 @@ function ModelCard({ model, onEdit, onDelete }: { model: ModelTemplate; onEdit: 
   const [activeImage, setActiveImage] = useState<string | null>(model.reference_image_url || null);
 
   useEffect(() => {
-    setActiveImage(model.reference_image_url || null);
+    queueMicrotask(() => setActiveImage(model.reference_image_url || null));
   }, [model.reference_image_url]);
 
   return (

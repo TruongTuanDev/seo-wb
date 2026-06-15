@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useStore } from "@/contexts/StoreContext";
 import { api } from "@/lib/api";
+import { PLAN_OPTIONS, SUPPORT_PHONE, planLabel } from "@/lib/plans";
 import { cn } from "@/lib/utils";
 
 type UsageSummary = {
@@ -18,17 +19,14 @@ type UsageSummary = {
   used_quota: number;
   remaining_quota: number;
   quota_percent: number;
-  monthly_cost_limit: number | null;
-  used_cost: number;
-  remaining_cost: number | null;
-  cost_percent: number | null;
   max_images_per_job: number;
-  allow_legacy_vton: boolean;
   allow_gpt_image: boolean;
   priority_queue: boolean;
   credit_balance: number;
   credits_used: number;
   credits_granted: number;
+  remaining_cards: number;
+  remaining_images: number;
   quota_reset_at: string | null;
 };
 
@@ -43,7 +41,6 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const { t } = useLanguage();
   const { stores, currentStoreId, isLoading, addStore } = useStore();
-
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
 
@@ -73,7 +70,6 @@ export default function DashboardPage() {
     );
   }
 
-
   if (noStores) {
     return (
       <div className="flex flex-col items-center justify-center gap-6 py-24 text-center">
@@ -94,7 +90,6 @@ export default function DashboardPage() {
   }
 
   const sid = activeStore?.id;
-
   const tiles = [
     {
       icon: ListChecks,
@@ -127,8 +122,7 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-3xl">
-      {/* Greeting */}
+    <div className="mx-auto max-w-4xl">
       <div className="mb-8">
         <p className="text-sm font-medium text-zinc-400">{getGreeting(t)},</p>
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{user?.name}</h1>
@@ -138,50 +132,48 @@ export default function DashboardPage() {
             <span className="font-medium text-zinc-700">{activeStore.name}</span>
           </div>
         )}
+
         {usage && (
-          <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-soft-sm">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="font-medium text-zinc-700">Plan {usage.plan_type.toUpperCase()}</span>
-              <span className="text-zinc-500">{usage.used_quota} / {usage.monthly_quota}</span>
+          <section className="mt-4 rounded-3xl border border-zinc-200 bg-white p-5 shadow-soft-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">Số dư hiện tại</p>
+                <h2 className="mt-1 text-lg font-semibold text-zinc-950">Plan {planLabel(usage.plan_type)}</h2>
+              </div>
+              <div className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">
+                {usage.remaining_cards} thẻ · {usage.remaining_images} ảnh
+              </div>
             </div>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Thẻ còn lại</p>
+                <p className="mt-1 text-3xl font-bold text-emerald-950">{usage.remaining_cards}</p>
+                <p className="mt-1 text-xs text-emerald-700">Đã tạo {usage.used_quota} / tổng {usage.monthly_quota} thẻ</p>
+              </div>
+              <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">Ảnh còn lại</p>
+                <p className="mt-1 text-3xl font-bold text-sky-950">{usage.remaining_images}</p>
+                <p className="mt-1 text-xs text-sky-700">Đã dùng {usage.credits_used} / đã cấp {usage.credits_granted} ảnh</p>
+              </div>
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-200">
               <div className="h-full rounded-full bg-brand" style={{ width: `${Math.min(100, usage.quota_percent)}%` }} />
             </div>
-            <p className="mt-2 text-xs text-zinc-500">Remaining: {usage.remaining_quota} generated images this cycle.</p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Max/job: {usage.max_images_per_job} · GPT image: {usage.allow_gpt_image ? "enabled" : "disabled"} · Legacy VTON: {usage.allow_legacy_vton ? "enabled" : "disabled"}
+            <p className="mt-3 text-xs text-zinc-500">
+              Max/job: {usage.max_images_per_job} · GPT image: {usage.allow_gpt_image ? "enabled" : "disabled"} · Priority: {usage.priority_queue ? "yes" : "no"}
             </p>
             <p className="mt-1 text-xs text-zinc-500">
               Next reset: {usage.quota_reset_at ? new Date(usage.quota_reset_at).toLocaleDateString() : "Not scheduled"}
             </p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Credits: {usage.credit_balance} available · {usage.credits_used} used this cycle
-            </p>
-            {usage.monthly_quota > 0 && usage.used_quota >= usage.monthly_quota && (
+            {(usage.remaining_cards <= 0 || usage.remaining_images <= 0) && (
               <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                Upgrade plan or contact admin.
+                Bạn đã hết {usage.remaining_cards <= 0 ? "thẻ" : "ảnh"}. Liên hệ {SUPPORT_PHONE} để nạp thêm.
               </div>
             )}
-            {usage.monthly_cost_limit !== null && usage.used_cost >= usage.monthly_cost_limit && (
-              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                Upgrade plan or contact admin.
-              </div>
-            )}
-            {usage.monthly_quota > 0 && usage.used_quota / usage.monthly_quota >= 0.8 && usage.used_quota < usage.monthly_quota && (
-              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                You are close to your monthly image limit.
-              </div>
-            )}
-            {usage.monthly_cost_limit !== null && usage.monthly_cost_limit > 0 && usage.used_cost / usage.monthly_cost_limit >= 0.8 && usage.used_cost < usage.monthly_cost_limit && (
-              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                You are close to your monthly cost limit.
-              </div>
-            )}
-          </div>
+          </section>
         )}
       </div>
 
-      {/* Quick actions */}
       <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-zinc-400">{t("quickActions")}</p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {tiles.map(({ icon: Icon, color, title, desc, href }) => (
@@ -203,6 +195,29 @@ export default function DashboardPage() {
           </Link>
         ))}
       </div>
+
+      <section className="mt-8 rounded-[28px] border border-zinc-200 bg-white/95 p-5 shadow-soft-sm">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">Gói sử dụng</p>
+            <h2 className="mt-2 text-xl font-semibold text-zinc-950">Nạp thêm thẻ và ảnh AI cho shop</h2>
+            <p className="mt-1 text-sm text-zinc-500">Liên hệ hỗ trợ: <span className="font-semibold text-zinc-900">{SUPPORT_PHONE}</span></p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-4">
+          {PLAN_OPTIONS.map((plan) => (
+            <article key={plan.value} className="rounded-2xl border border-zinc-200 bg-gradient-to-b from-white to-zinc-50 p-4">
+              <div className="text-sm font-semibold text-zinc-950">{plan.label}</div>
+              <div className="mt-2 text-2xl font-bold text-zinc-950">{plan.priceRub.toLocaleString("ru-RU")} ₽</div>
+              <div className="mt-3 space-y-1 text-sm text-zinc-600">
+                <p>{plan.cards} thẻ tạo bài</p>
+                <p>{plan.images} ảnh AI</p>
+              </div>
+              <p className="mt-3 text-xs text-zinc-500">{plan.description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

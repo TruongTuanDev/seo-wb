@@ -756,7 +756,6 @@ class ProductImageGenerator:
         )
         user = db.get(User, job.user_id)
         if user:
-            user.used_quota = max(0, int(user.used_quota or 0) + int(job.quantity or 0))
             user.used_cost = round(float(user.used_cost or 0.0) + float(job.estimated_cost or 0.0), 4)
             if job.credit_cost > 0 and job.credits_consumed_at is None:
                 user.credit_balance = max(0, int(user.credit_balance or 0) - int(job.credit_cost or 0))

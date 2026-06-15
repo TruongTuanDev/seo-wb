@@ -53,5 +53,7 @@ class UsageSummaryResponse(BaseModel):
     credit_balance: int = 0
     credits_used: int = 0
     credits_granted: int = 0
+    remaining_cards: int = 0
+    remaining_images: int = 0
     quota_reset_at: datetime | None = None
     last_quota_reset_at: datetime | None = None

@@ -9,6 +9,9 @@ from app.core.errors import AppError
 @dataclass(frozen=True)
 class UsagePlan:
     plan_type: str
+    name: str
+    price_rub: int
+    monthly_credits: int
     monthly_quota: int
     monthly_cost_limit: float | None
     max_images_per_job: int
@@ -19,29 +22,51 @@ class UsagePlan:
 
 FREE_PLAN = UsagePlan(
     plan_type="free",
-    monthly_quota=30,
-    monthly_cost_limit=5.0,
-    max_images_per_job=4,
+    name="Free",
+    price_rub=0,
+    monthly_credits=9,
+    monthly_quota=3,
+    monthly_cost_limit=None,
+    max_images_per_job=8,
     allow_legacy_vton=False,
     allow_gpt_image=True,
     priority_queue=False,
 )
 
-PRO_PLAN = UsagePlan(
-    plan_type="pro",
-    monthly_quota=500,
-    monthly_cost_limit=50.0,
+BASIC_PLAN = UsagePlan(
+    plan_type="basic",
+    name="Basic",
+    price_rub=3000,
+    monthly_credits=60,
+    monthly_quota=10,
+    monthly_cost_limit=None,
     max_images_per_job=8,
     allow_legacy_vton=True,
     allow_gpt_image=True,
     priority_queue=False,
 )
 
-AGENCY_PLAN = UsagePlan(
-    plan_type="agency",
-    monthly_quota=3000,
-    monthly_cost_limit=300.0,
-    max_images_per_job=12,
+PLUS_PLAN = UsagePlan(
+    plan_type="plus",
+    name="Plus",
+    price_rub=5500,
+    monthly_credits=120,
+    monthly_quota=20,
+    monthly_cost_limit=None,
+    max_images_per_job=8,
+    allow_legacy_vton=True,
+    allow_gpt_image=True,
+    priority_queue=True,
+)
+
+PREMIUM_PLAN = UsagePlan(
+    plan_type="premium",
+    name="Premium",
+    price_rub=8000,
+    monthly_credits=180,
+    monthly_quota=30,
+    monthly_cost_limit=None,
+    max_images_per_job=8,
     allow_legacy_vton=True,
     allow_gpt_image=True,
     priority_queue=True,
@@ -49,15 +74,22 @@ AGENCY_PLAN = UsagePlan(
 
 USAGE_PLANS: dict[str, UsagePlan] = {
     FREE_PLAN.plan_type: FREE_PLAN,
-    PRO_PLAN.plan_type: PRO_PLAN,
-    AGENCY_PLAN.plan_type: AGENCY_PLAN,
+    BASIC_PLAN.plan_type: BASIC_PLAN,
+    PLUS_PLAN.plan_type: PLUS_PLAN,
+    PREMIUM_PLAN.plan_type: PREMIUM_PLAN,
+}
+
+PLAN_ALIASES = {
+    "pro": "plus",
+    "agency": "premium",
 }
 
 
 def normalize_plan_type(value: str | None) -> str:
     plan_type = (value or FREE_PLAN.plan_type).strip().lower()
+    plan_type = PLAN_ALIASES.get(plan_type, plan_type)
     if plan_type not in USAGE_PLANS:
-        raise AppError("invalid_plan_type", "Plan type must be free, pro, or agency.", 400)
+        raise AppError("invalid_plan_type", "Plan type must be free, basic, plus, or premium.", 400)
     return plan_type
 
 
@@ -77,11 +109,10 @@ def apply_plan_defaults(user, plan_type: str | None = None, *, reference: dateti
     user.plan_type = plan.plan_type
     user.monthly_quota = plan.monthly_quota
     user.monthly_cost_limit = plan.monthly_cost_limit
-    now = reference.astimezone(timezone.utc) if reference else datetime.now(timezone.utc)
     if getattr(user, "quota_reset_at", None) is None:
-        user.quota_reset_at = next_quota_reset_after(now)
+        user.quota_reset_at = None
     if getattr(user, "last_quota_reset_at", None) is None:
-        user.last_quota_reset_at = now
+        user.last_quota_reset_at = None
     try:
         from app.services.billing_foundation import initialize_user_credits
 
@@ -96,9 +127,7 @@ def reset_usage_cycle(user, *, reference: datetime | None = None) -> datetime:
     user.used_quota = 0
     user.used_cost = 0.0
     try:
-        from app.services.billing_foundation import monthly_credits_for_plan
-
-        monthly_credits = monthly_credits_for_plan(getattr(user, "plan_type", None))
+        monthly_credits = get_usage_plan(getattr(user, "plan_type", None)).monthly_credits
         user.credit_balance = monthly_credits
         user.credits_used = 0
         user.credits_granted = max(0, int(getattr(user, "credits_granted", 0) or 0)) + monthly_credits
@@ -112,8 +141,15 @@ def reset_usage_cycle(user, *, reference: datetime | None = None) -> datetime:
 def reset_usage_if_due(user, *, reference: datetime | None = None) -> bool:
     now = reference.astimezone(timezone.utc) if reference else datetime.now(timezone.utc)
     if getattr(user, "quota_reset_at", None) is None and getattr(user, "last_quota_reset_at", None) is None:
-        apply_plan_defaults(user, getattr(user, "plan_type", None), reference=now)
-        return True
+        if int(getattr(user, "credits_granted", 0) or 0) == 0:
+            try:
+                from app.services.billing_foundation import initialize_user_credits
+
+                initialize_user_credits(user)
+                return True
+            except Exception:
+                return False
+        return False
     if int(getattr(user, "credits_granted", 0) or 0) == 0:
         try:
             from app.services.billing_foundation import initialize_user_credits
@@ -123,8 +159,7 @@ def reset_usage_if_due(user, *, reference: datetime | None = None) -> bool:
             pass
     quota_reset_at = getattr(user, "quota_reset_at", None)
     if quota_reset_at is None:
-        user.quota_reset_at = next_quota_reset_after(now)
-        return True
+        return False
     quota_reset_at_utc = quota_reset_at.astimezone(timezone.utc) if quota_reset_at.tzinfo else quota_reset_at.replace(tzinfo=timezone.utc)
     if quota_reset_at_utc <= now:
         reset_usage_cycle(user, reference=now)

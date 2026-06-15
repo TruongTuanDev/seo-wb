@@ -37,6 +37,12 @@ class AdminUserUpdateRequest(BaseModel):
     credits_granted: int | None = None
 
 
+class AdminUserQuotaGrantRequest(BaseModel):
+    card_quota_delta: int = Field(default=0, ge=0, le=100000)
+    image_credit_delta: int = Field(default=0, ge=0, le=100000)
+    note: str | None = Field(default=None, max_length=255)
+
+
 class AdminUserResponse(UserResponse):
     max_images_per_job: int
     allow_legacy_vton: bool
@@ -49,6 +55,8 @@ class AdminUserResponse(UserResponse):
     credit_balance: int
     credits_used: int
     credits_granted: int
+    remaining_cards: int
+    remaining_images: int
     quota_reset_at: datetime | None
     last_quota_reset_at: datetime | None
     close_to_quota_limit: bool

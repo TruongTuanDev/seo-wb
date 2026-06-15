@@ -118,7 +118,7 @@ def _enforce_user_quota(user: User, quantity: int) -> None:
         remaining = max(0, user.monthly_quota - user.used_quota)
         raise AppError(
             "quota_exceeded",
-            f"Monthly generation quota exceeded. Remaining quota: {remaining}.",
+            f"Card creation quota exceeded. Remaining cards: {remaining}.",
             403,
         )
 
@@ -228,20 +228,10 @@ def _pending_generation_usage(db: Session, user_id: int) -> tuple[int, float]:
 
 
 def _enforce_generation_budget(db: Session, user: User, quantity: int, estimated_cost: float) -> None:
-    pending_quota, pending_cost = _pending_generation_usage(db, user.id)
-    effective_used_quota = max(0, int(user.used_quota or 0) + pending_quota)
-    effective_monthly_quota = max(0, int(user.monthly_quota or 0))
-    if effective_used_quota + quantity > effective_monthly_quota:
-        remaining = max(0, effective_monthly_quota - effective_used_quota)
-        raise AppError(
-            "quota_exceeded",
-            f"Monthly generation quota exceeded. Remaining quota: {remaining}.",
-            403,
-        )
-
     if user.monthly_cost_limit is None:
         return
 
+    _, pending_cost = _pending_generation_usage(db, user.id)
     effective_used_cost = round(float(user.used_cost or 0.0) + pending_cost, 4)
     if effective_used_cost + estimated_cost > float(user.monthly_cost_limit):
         remaining = max(0.0, float(user.monthly_cost_limit) - effective_used_cost)
@@ -262,6 +252,8 @@ async def generate_card(
     user: User = Depends(get_current_user),
 ) -> CardGenerateResponse:
     store = get_owned_store(db, user, store_id)
+    locked_user = _lock_user_for_generation_budget(db, user.id)
+    _enforce_user_quota(locked_user, 1)
     product_input = _parse_product_input(product_input_json)
     if len(images) > settings.max_generate_images:
         raise AppError("too_many_images", f"Upload at most {settings.max_generate_images} images for analysis.", 400)
@@ -270,6 +262,8 @@ async def generate_card(
         for image in images
     ]
     draft = await CardFlowService(settings, db, user, store).generate_draft(image_bytes, product_input)
+    locked_user.used_quota = max(0, int(locked_user.used_quota or 0)) + 1
+    db.commit()
     card_payload = [CardUploadGroup.model_validate(group) for group in draft.card_payload]
     analysis = _draft_analysis(draft)
     return CardGenerateResponse(

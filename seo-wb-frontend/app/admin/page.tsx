@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { AdminStatCard } from "@/components/admin/AdminStatCard";
 import { api } from "@/lib/api";
+import { PLAN_OPTIONS, planLabel } from "@/lib/plans";
 
 type Dashboard = {
   total_users: number;
@@ -59,9 +60,9 @@ export default function AdminDashboardPage() {
           Plan
           <select className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm" value={plan} onChange={(e) => setPlan(e.target.value)}>
             <option value="">All</option>
-            <option value="free">Free</option>
-            <option value="pro">Pro</option>
-            <option value="agency">Agency</option>
+            {PLAN_OPTIONS.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
           </select>
         </label>
         <label className="text-sm font-medium text-stone-700">
@@ -112,11 +113,11 @@ export default function AdminDashboardPage() {
                     <div className="text-sm text-stone-500">{item.email}</div>
                   </div>
                   <span className="rounded-full bg-stone-900 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-white">
-                    {item.plan_type}
+                    {planLabel(item.plan_type)}
                   </span>
                 </div>
                 <div className="mt-3 flex items-center justify-between text-sm text-stone-700">
-                  <span>{item.used_quota} / {item.monthly_quota} images</span>
+                  <span>{item.used_quota} / {item.monthly_quota} cards</span>
                   <span>{item.quota_percent.toFixed(0)}%</span>
                 </div>
               </div>
@@ -138,7 +139,7 @@ export default function AdminDashboardPage() {
                     <div className="text-sm text-stone-500">{item.email}</div>
                   </div>
                   <span className="rounded-full bg-stone-900 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-white">
-                    {item.plan_type}
+                    {planLabel(item.plan_type)}
                   </span>
                 </div>
                 <div className="mt-3 flex items-center justify-between text-sm text-stone-700">

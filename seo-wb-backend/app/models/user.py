@@ -16,7 +16,7 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), default="user", index=True, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="active", index=True, nullable=False)
     plan_type: Mapped[str] = mapped_column(String(20), default="free", index=True, nullable=False)
-    monthly_quota: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
+    monthly_quota: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
     used_quota: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     monthly_cost_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
     used_cost: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
