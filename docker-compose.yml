@@ -74,6 +74,8 @@ services:
     build:
       context: ./seo-wb-backend
       dockerfile: Dockerfile
+    deploy:
+      replicas: 3
     restart: unless-stopped
     command: ["python", "-m", "app.workers.image_generation_worker"]
     env_file:
