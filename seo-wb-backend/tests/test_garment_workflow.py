@@ -63,6 +63,8 @@ def test_gpt_prompt_builder():
     assert "Do not recolor the garment." in prompt
     assert "#BFD4E8" in prompt
     assert "rhinestones" in prompt
+    assert "You may replace or restyle only the model's upper-body clothing" in prompt
+    assert "must not cover the waistband" in prompt
 
     focused_prompt = GPTPromptBuilder.build_prompt(
         garment_json,
@@ -85,6 +87,17 @@ def test_gpt_prompt_builder():
     assert "STRICT GARMENT PRESERVATION MODE" in strict_prompt
     assert "main_color" in strict_prompt
     assert "silhouette" in strict_prompt
+
+
+def test_complementary_styling_respects_product_area():
+    upper = GPTPromptBuilder.complementary_styling_block({"garment_area": "upper_body"})
+    lower = GPTPromptBuilder.complementary_styling_block({"garment_area": "lower_body"})
+    full = GPTPromptBuilder.complementary_styling_block({"garment_area": "full_body"})
+
+    assert "lower-body clothing" in upper
+    assert "upper-body clothing" in lower
+    assert "FULL OUTFIT LOCK" in full
+    assert "do not replace, remove, or redesign any component" in full
 
 
 def test_garment_validator_failures():
@@ -137,26 +150,31 @@ def test_build_tasks_quantity_rules():
     assert len(tasks_3) == 3
     assert [task["label"] for task in tasks_3] == ["Front", "Lifestyle", "Detail"]
     assert sum(bool(task["product_focus"]) for task in tasks_3) == 1
+    assert {task["label"] for task in tasks_3 if task["product_focus"]} == {"Front"}
 
     tasks_6_back = GPTImageCatalogService.build_tasks(6, has_back_image=True)
     assert len(tasks_6_back) == 6
     assert [task["label"] for task in tasks_6_back] == ["Front", "Side", "Back", "Lifestyle", "Detail", "Banner"]
     assert sum(bool(task["product_focus"]) for task in tasks_6_back) == 3
+    assert {task["label"] for task in tasks_6_back if task["product_focus"]} == {"Front", "Side", "Back"}
 
     tasks_6_no_back = GPTImageCatalogService.build_tasks(6, has_back_image=False)
     assert len(tasks_6_no_back) == 6
     assert [task["label"] for task in tasks_6_no_back] == ["Front", "Side", "Lifestyle", "Detail", "Extra Detail", "Banner"]
     assert sum(bool(task["product_focus"]) for task in tasks_6_no_back) == 3
+    assert {task["label"] for task in tasks_6_no_back if task["product_focus"]} == {"Front", "Side", "Extra Detail"}
 
     tasks_8_back = GPTImageCatalogService.build_tasks(8, has_back_image=True)
     assert len(tasks_8_back) == 8
     assert [task["label"] for task in tasks_8_back] == ["Front", "Side", "Back", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Banner"]
     assert sum(bool(task["product_focus"]) for task in tasks_8_back) == 4
+    assert {task["label"] for task in tasks_8_back if task["product_focus"]} == {"Front", "Side", "Back", "Banner"}
 
     tasks_8_no_back = GPTImageCatalogService.build_tasks(8, has_back_image=False)
     assert len(tasks_8_no_back) == 8
     assert [task["label"] for task in tasks_8_no_back] == ["Front", "Side", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Product Detail", "Banner"]
     assert sum(bool(task["product_focus"]) for task in tasks_8_no_back) == 4
+    assert {task["label"] for task in tasks_8_no_back if task["product_focus"]} == {"Front", "Side", "Product Detail", "Banner"}
 
     # Legacy 9-image jobs use the new 8-image bundle.
     assert GPTImageCatalogService.build_tasks(9, has_back_image=True) == tasks_8_back

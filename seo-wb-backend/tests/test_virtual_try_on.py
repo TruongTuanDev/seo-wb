@@ -578,6 +578,7 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
     assert len(tasks_6_back) == 6
     assert [task["label"] for task in tasks_6_back] == ["Front", "Side", "Back", "Lifestyle", "Detail", "Banner"]
     assert tasks_6_back[2]["pose"] == "back"
+    assert {task["label"] for task in tasks_6_back if task["product_focus"]} == {"Front", "Side", "Back"}
 
     # 3. Test quantity 6 without back image (replaces back with Extra Detail)
     tasks_6_no_back = build_simplified_catalog_tasks(
@@ -592,6 +593,7 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
     assert len(tasks_6_no_back) == 6
     assert [task["label"] for task in tasks_6_no_back] == ["Front", "Side", "Lifestyle", "Detail", "Extra Detail", "Banner"]
     assert tasks_6_no_back[4]["type"] == "front_detail" # mapped Extra Detail to front_detail
+    assert {task["label"] for task in tasks_6_no_back if task["product_focus"]} == {"Front", "Side", "Extra Detail"}
 
     # 4. Test quantity 8 with back image
     tasks_8_back = build_simplified_catalog_tasks(
@@ -607,6 +609,7 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
     assert [task["label"] for task in tasks_8_back] == ["Front", "Side", "Back", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Banner"]
     assert tasks_8_back[2]["pose"] == "back"
     assert sum(bool(task["product_focus"]) for task in tasks_8_back) == 4
+    assert {task["label"] for task in tasks_8_back if task["product_focus"]} == {"Front", "Side", "Back", "Banner"}
 
     # 5. Test quantity 8 without back image (uses Product Detail)
     tasks_8_no_back = build_simplified_catalog_tasks(
@@ -621,6 +624,7 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
     assert len(tasks_8_no_back) == 8
     assert [task["label"] for task in tasks_8_no_back] == ["Front", "Side", "Walking", "Hand On Hip", "Sitting", "Fabric Detail", "Product Detail", "Banner"]
     assert sum(bool(task["product_focus"]) for task in tasks_8_no_back) == 4
+    assert {task["label"] for task in tasks_8_no_back if task["product_focus"]} == {"Front", "Side", "Product Detail", "Banner"}
 
     # Legacy quantity 9 remains compatible and resolves to the 8-image bundle.
     tasks_legacy_9 = build_simplified_catalog_tasks(

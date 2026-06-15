@@ -46,6 +46,29 @@ class GPTPromptBuilder:
         )
 
     @staticmethod
+    def complementary_styling_block(garment_json: dict[str, Any]) -> str:
+        area = str(garment_json.get("garment_area") or "upper_body").lower().strip()
+        if area == "lower_body":
+            return (
+                "COMPLEMENTARY OUTFIT STYLING:\n"
+                "The uploaded lower-body garment is the product and must remain unchanged.\n"
+                "You may replace or restyle only the model's upper-body clothing with a tasteful coordinated ecommerce top.\n"
+                "The top must not cover the waistband, pockets, fit, or any product detail."
+            )
+        if area == "upper_body":
+            return (
+                "COMPLEMENTARY OUTFIT STYLING:\n"
+                "The uploaded upper-body garment is the product and must remain unchanged.\n"
+                "You may replace or restyle only the model's lower-body clothing with tasteful coordinated ecommerce bottoms.\n"
+                "The bottoms must not cover the product hem, silhouette, or any product detail."
+            )
+        return (
+            "FULL OUTFIT LOCK:\n"
+            "The uploaded product is a full-body garment or coordinated set.\n"
+            "Preserve every visible part of the outfit exactly and do not replace, remove, or redesign any component."
+        )
+
+    @staticmethod
     def _article_context_block(garment_json: dict[str, Any]) -> str:
         source_title = str(garment_json.get("source_title") or "").strip()
         source_description = str(garment_json.get("source_description") or "").strip()
@@ -222,8 +245,8 @@ The product itself must remain visually identical to the source.
             area_prompt = (
                 "Garment area: upper body.\n\n"
                 "Replace only the upper-body garment with the uploaded product.\n\n"
-                "Keep pants, skirt, shoes, face, hair, hands and body proportions unchanged.\n\n"
-                "Do not change the lower-body clothing."
+                "Keep shoes, face, hair, hands and body proportions unchanged.\n\n"
+                "Lower-body clothing may be restyled only as complementary clothing."
             )
         elif area == "lower_body":
             category_name = garment_json.get("category", "").lower().strip()
@@ -238,7 +261,8 @@ The product itself must remain visually identical to the source.
                 f"Garment area: lower body.\n\n"
                 f"Replace only the lower-body garment with the uploaded product.\n\n"
                 f"The garment must start at the correct waist position and extend downward according to the product length.\n\n"
-                f"Keep upper-body clothing, face, hair, hands and body proportions unchanged.\n\n"
+                f"Keep face, hair, hands and body proportions unchanged.\n\n"
+                f"Upper-body clothing may be restyled only as complementary clothing.\n\n"
                 f"{skirt_rule}\n\n"
                 f"{pants_rule}\n\n"
                 f"Remove or fully cover any conflicting original lower-body clothing on the model."
@@ -306,6 +330,7 @@ The product itself must remain visually identical to the source.
             f"Style Setting:\n{style_desc}",
             f"Pose Instruction:\n{pose_desc}",
             GPTPromptBuilder.product_focus_block(garment_json, product_focus),
+            GPTPromptBuilder.complementary_styling_block(garment_json),
             area_prompt,
             garment_info
         ]
@@ -318,7 +343,7 @@ The product itself must remain visually identical to the source.
                 f"Do not redesign the garment.\n"
                 f"This is a product photography task, not a fashion redesign task.\n"
                 f"The generated garment must be visually identical to the source garment.\n"
-                f"Only change: model pose, background, camera angle.\n"
+                f"Only change: model pose, background, camera angle, and complementary non-product clothing when explicitly allowed.\n"
                 f"Do not change the garment itself.\n"
                 f"STRICT GARMENT PRESERVATION MODE!\n"
                 f"WARNING: The previous generation failed validation on the following fields: {failed_fields_str}.\n"
@@ -360,15 +385,15 @@ The product itself must remain visually identical to the source.
         garment_area = garment_json.get("garment_area") or "upper_body"
         if garment_area == "lower_body":
             area_instruction = "Dress the model in this skirt as a lower-body garment only." if "skirt" in product_type.lower() or "юбк" in category.lower() else f"Dress the model in this {product_type} as a lower-body garment only."
-            complement_rule = "Keep the upper-body clothing natural and simple."
+            complement_rule = "You may replace the upper-body clothing with a simple coordinated ecommerce top. Never cover the waistband or lower-body product details."
             conversion_avoid = f"Do not turn the {product_type} into a top. Do not turn the {product_type} into pants." if "skirt" in product_type.lower() or "юбк" in category.lower() else f"Do not turn the {product_type} into a top."
         elif garment_area == "upper_body":
             area_instruction = f"Dress the model in this {product_type} as an upper-body garment only."
-            complement_rule = "Keep the lower-body clothing natural and simple."
+            complement_rule = "You may replace the lower-body clothing with simple coordinated ecommerce bottoms. Never cover the upper-body product hem or details."
             conversion_avoid = f"Do not turn the {product_type} into a skirt. Do not turn the {product_type} into pants."
         else:
             area_instruction = f"Dress the model in this {product_type} as a full-body garment."
-            complement_rule = ""
+            complement_rule = "Keep the complete full-body garment or coordinated set unchanged. Do not replace any visible outfit component."
             conversion_avoid = f"Do not turn the {product_type} into a top. Do not turn the {product_type} into pants."
 
         # Reconstruct standard color-fabric-category phrasing
@@ -397,7 +422,7 @@ CRITICAL GARMENT FIDELITY MODE
 Do not redesign the garment.
 This is a product photography task, not a fashion redesign task.
 The generated garment must be visually identical to the source garment.
-Only change: model pose, background, camera angle.
+Only change: model pose, background, camera angle, and complementary non-product clothing when explicitly allowed.
 Do not change the garment itself.
 
 {model_ref_inst}

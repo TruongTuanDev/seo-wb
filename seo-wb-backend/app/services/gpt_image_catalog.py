@@ -158,9 +158,9 @@ def _build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str,
 def build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str, Any]]:
     tasks = _build_catalog_bundle(quantity, has_back_image)
     focused_labels_by_size = {
-        3: {"Detail"},
-        6: {"Front", "Detail", "Back" if has_back_image else "Extra Detail"},
-        8: {"Front", "Side", "Fabric Detail", "Back" if has_back_image else "Product Detail"},
+        3: {"Front"},
+        6: {"Front", "Side", "Back" if has_back_image else "Extra Detail"},
+        8: {"Front", "Side", "Banner", "Back" if has_back_image else "Product Detail"},
     }
     focused_labels = focused_labels_by_size[len(tasks)]
     return [{**task, "product_focus": task["label"] in focused_labels} for task in tasks]

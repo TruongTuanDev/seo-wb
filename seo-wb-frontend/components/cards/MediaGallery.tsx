@@ -260,7 +260,7 @@ export function MediaGallery({
   const [quantity, setQuantity] = useState(5);
   const [validationError, setValidationError] = useState("");
   const [selectedModelId, setSelectedModelId] = useState<string>("");
-  const [backgroundStyle, setBackgroundStyle] = useState<string>("studio");
+  const backgroundStyle = "studio";
   const [selectedImageModel, setSelectedImageModel] = useState<string>("gpt-image-2");
   const [customModelImage, setCustomModelImage] = useState<File | null>(null);
   const [modelSource, setModelSource] = useState<"my" | "system" | "upload">("my");
@@ -433,20 +433,6 @@ export function MediaGallery({
       );
       if (matchingModel) {
         startTransition(() => setSelectedModelId(matchingModel.id));
-      }
-      if (recommendations.recommendedBackground) {
-        const recBg = recommendations.recommendedBackground.toLowerCase();
-        if (recBg.includes("street")) {
-          startTransition(() => setBackgroundStyle("streetwear"));
-        } else if (recBg.includes("boutique") || recBg.includes("luxury")) {
-          startTransition(() => setBackgroundStyle("luxury"));
-        } else if (recBg.includes("gym") || recBg.includes("sport")) {
-          startTransition(() => setBackgroundStyle("sports"));
-        } else if (recBg.includes("cafe") || recBg.includes("lifestyle")) {
-          startTransition(() => setBackgroundStyle("lifestyle"));
-        } else {
-          startTransition(() => setBackgroundStyle("studio"));
-        }
       }
     }
   }, [models, recommendations]);
@@ -1014,46 +1000,6 @@ export function MediaGallery({
                       )}
                     </div>
                   )}
-
-                  {/* AI Image Model Selector */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-zinc-800">AI Image Model</label>
-                    <select
-                      value={selectedImageModel}
-                      onChange={(e) => setSelectedImageModel(e.target.value)}
-                      className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand shadow-soft-sm"
-                    >
-                      <option value="gpt-image-2">gpt-image-2 (Default)</option>
-                      <option value="gpt-image-2-2026-04-21">gpt-image-2-2026-04-21</option>
-                    </select>
-                  </div>
-
-                  {/* Style selector */}
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-zinc-800">Style</label>
-                    <div className="grid grid-cols-5 gap-2">
-                      {[
-                        { label: "Studio", value: "studio" },
-                        { label: "Streetwear", value: "streetwear" },
-                        { label: "Luxury", value: "luxury" },
-                        { label: "Lifestyle", value: "lifestyle" },
-                        { label: "Sports", value: "sports" }
-                      ].map((s) => (
-                        <button
-                          key={s.value}
-                          type="button"
-                          onClick={() => setBackgroundStyle(s.value)}
-                          className={`rounded-lg py-2.5 text-xs font-semibold border transition-all duration-150 ${
-                            backgroundStyle === s.value
-                              ? "bg-brand border-brand text-white shadow-soft-sm"
-                              : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
-                          }`}
-                        >
-                          {s.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
 
                   {/* Garment JSON preview */}
                   <div>
