@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     rabbitmq_password: str | None = None
     rabbitmq_vhost: str | None = None
     rabbitmq_ssl: bool = False
+    rabbitmq_prefetch_count: int = 1
+    rabbitmq_processing_lock_seconds: int = 3600
+    rabbitmq_idempotency_ttl_seconds: int = 86400
+    rabbitmq_failed_idempotency_ttl_seconds: int = 900
 
     cloudinary_cloud_name: str | None = None
     cloudinary_api_key: str | None = None
@@ -98,6 +102,7 @@ class Settings(BaseSettings):
     finance_scheduler_poll_seconds: int = 60
     finance_scheduler_leader_lock_seconds: int = 90
     finance_auto_job_lock_seconds: int = 1800
+    finance_failed_retry_seconds: int = 3600
     usage_reset_scheduler_poll_seconds: int = 86400
 
     @property

@@ -22,14 +22,11 @@ SYSTEM_PROMPT = (
     "Формат: массив объектов {subjectID, variants}. Каждый variant содержит vendorCode, title, description, brand, dimensions, characteristics, sizes. "
     "Пиши title и description на русском языке. "
     "ПРАВИЛА ДЛЯ СОЗДАНИЯ ОПИСАНИЯ (description): "
-    "- Сделай описание структурированным, продающим и привлекательным. "
-    "- Обязательно используй следующую структуру: "
-    "  1. Вовлекающее введение, описывающее стиль и ценность товара (2-3 предложения). "
-    "  2. Список ключевых преимуществ и особенностей товара (используй аккуратные эмодзи для списков). "
-    "  3. Идеи для образов: с чем носить, для каких случаев подходит (работа, прогулка, праздник). "
-    "  4. Рекомендации по уходу или выбору размера. "
-    "- Органично интегрируй популярные поисковые запросы (SEO), соответствующие категории товара, избегая спама. "
-    "- Текст должен быть легким для чтения, без сплошных длинных абзацев. "
+    "- Сделай описание связным, живым и естественным текстом без сухого перечисления характеристик. "
+    "- Длина описания должна быть строго в пределах от 600 до 900 символов. "
+    "- Используй family_copy_policy из payload как главный ориентир для tone, focus_points, use_cases и forbidden_phrases. "
+    "- Не применяй универсальные fashion-формулировки ко всем категориям: белье, домашняя одежда, аксессуары, верхняя одежда и базовая одежда требуют разного контекста. "
+    "- Пиши только релевантные сценарии использования и выгоды для конкретной категории товара. "
     "ПРАВИЛА ДЛЯ ХАРАКТЕРИСТИК (characteristics): "
     "- Characteristics заполняй только из provided fillable_charcs: используй точный id, не придумывай id. "
     "- Заполняй required и popular характеристики, если значение можно уверенно вывести из image_analysis или user_input. "
@@ -39,7 +36,9 @@ SYSTEM_PROMPT = (
     "ПРАВИЛА ДЛЯ ВАРИАНТОВ И РАЗМЕРОВ: "
     "- Если extracted_user_intent содержит несколько цветов, создай variant для каждого цвета. "
     "- Размеры S-42 преобразуй в techSize=S и wbSize=42. Одиночный размер S означает techSize=S и wbSize=S. "
-    "- Если есть vendor_code, vendorCode должен быть base/colorCode."
+    "- Если есть vendor_code, vendorCode должен быть base/РусскийЦвет."
+    "- В title запрещены пол/аудитория, возраст, цвет, бренд, сезон и состав/материал. "
+    "- В description запрещены конкретные названия цветов и списки поисковых фраз. "
 )
 
 TITLE_GENERATION_PROMPT = """
@@ -91,13 +90,33 @@ class CardGenerator:
         analysis: ImageAnalysis,
         subject: dict[str, Any],
         charcs: list[dict[str, Any]],
+        garment_json: dict[str, Any] | None = None,
+        seo_keyword_plan: dict[str, Any] | None = None,
+        attribute_confidence: dict[str, Any] | None = None,
     ) -> list[CardUploadGroup]:
         fallback_intent = ProductIntentParser.parse(user_input.note)
         gemini_intent = ProductIntentParser.from_analysis(analysis)
         intent = gemini_intent.merge_missing(fallback_intent)
         if self._client and self._model:
-            return self._generate_with_openai(user_input, analysis, subject, charcs, intent)
-        return self._generate_fallback(user_input, analysis, subject, charcs, intent)
+            return self._generate_with_openai(
+                user_input,
+                analysis,
+                subject,
+                charcs,
+                intent,
+                garment_json or {},
+                seo_keyword_plan or {},
+                attribute_confidence or {},
+            )
+        return self._generate_fallback(
+            user_input,
+            analysis,
+            subject,
+            charcs,
+            intent,
+            seo_keyword_plan or {},
+            attribute_confidence or {},
+        )
 
     def _generate_with_openai(
         self,
@@ -106,7 +125,12 @@ class CardGenerator:
         subject: dict[str, Any],
         charcs: list[dict[str, Any]],
         intent: ProductIntent,
+        garment_json: dict[str, Any],
+        seo_keyword_plan: dict[str, Any],
+        attribute_confidence: dict[str, Any],
     ) -> list[CardUploadGroup]:
+        confirmed_attributes = (attribute_confidence or {}).get("confirmed_attributes") or {}
+        inferred_attributes = (attribute_confidence or {}).get("inferred_attributes") or {}
         user_payload = {
             "task": "generate_wildberries_product_card",
             "user_input": user_input.model_dump(),
@@ -155,7 +179,7 @@ class CardGenerator:
             raw = self._enrich_openai_output(raw, user_input, analysis, subject, intent, charcs)
             return [CardUploadGroup.model_validate(item) for item in raw]
         except Exception:
-            return self._generate_fallback(user_input, analysis, subject, charcs, intent)
+            return self._generate_fallback(user_input, analysis, subject, charcs, intent, seo_keyword_plan, attribute_confidence)
 
     @staticmethod
     def _intent_payload(intent: ProductIntent) -> dict[str, Any]:
@@ -201,9 +225,12 @@ class CardGenerator:
         subject: dict[str, Any],
         intent: ProductIntent,
         charcs: list[dict[str, Any]],
+        seo_keyword_plan: dict[str, Any],
+        attribute_confidence: dict[str, Any],
     ) -> Any:
         if not isinstance(raw, list):
             return raw
+        default_category = subject.get("subjectName") or analysis.category or user_input.category or "Товар"
         for group in raw:
             if not isinstance(group, dict):
                 continue
@@ -235,6 +262,21 @@ class CardGenerator:
                 variant.setdefault("dimensions", self._dimensions(user_input, intent))
                 if not variant.get("sizes"):
                     variant["sizes"] = [size.model_dump(mode="json", exclude_none=True) for size in self._sizes(user_input, intent)]
+                title_payload = build_seo_title(
+                    default_category,
+                    analysis.gender or user_input.gender,
+                    self._title_attributes(user_input, analysis, subject, seo_keyword_plan, attribute_confidence),
+                    seo_keyword_plan,
+                    brand=self._brand(user_input),
+                )
+                variant["title"] = cleanup_title(str(title_payload.get("title") or variant.get("title") or ""), default_category, analysis, user_input)
+                variant["description"] = cleanup_description(
+                    str(variant.get("description") or ""),
+                    title=variant["title"],
+                    subject=subject,
+                    analysis=analysis,
+                    user_input=user_input,
+                )
         self._apply_intent_to_raw(raw, user_input, intent, charcs)
         return raw
 
@@ -245,10 +287,12 @@ class CardGenerator:
         subject: dict[str, Any],
         charcs: list[dict[str, Any]],
         intent: ProductIntent,
+        seo_keyword_plan: dict[str, Any],
+        attribute_confidence: dict[str, Any],
     ) -> list[CardUploadGroup]:
         subject_id = int(subject["subjectID"])
         default_category = subject.get("subjectName") or "Товар"
-        title = self._title(user_input, analysis, default_category)
+        title = self._title(user_input, analysis, subject, default_category, seo_keyword_plan, attribute_confidence)
         variant = Variant(
             vendorCode=self._vendor_base(user_input, intent),
             title=title,
@@ -378,7 +422,8 @@ class CardGenerator:
                 expanded = []
                 for color in intent.colors:
                     variant = json.loads(json.dumps(template, ensure_ascii=False))
-                    variant["vendorCode"] = f"{vendor_base}/{color.code}"
+                    color_suffix = ProductIntentParser.display_value_from_color(color.value)
+                    variant["vendorCode"] = f"{vendor_base}/{color_suffix}"
                     variant["brand"] = cls._brand(user_input)
                     variant["sizes"] = sizes
                     variant["dimensions"] = dimensions
@@ -388,7 +433,10 @@ class CardGenerator:
                 group["variants"] = expanded
             else:
                 for index, variant in enumerate(variants, 1):
-                    if variant.get("vendorCode") in {None, "", "CHANGE-ME"}:
+                    color_suffix = cls._variant_color_suffix(variant, color_charc_id)
+                    if color_suffix:
+                        variant["vendorCode"] = f"{vendor_base}/{color_suffix}"
+                    elif variant.get("vendorCode") in {None, "", "CHANGE-ME"}:
                         variant["vendorCode"] = f"{vendor_base}/{index}" if len(variants) > 1 else vendor_base
                     variant["brand"] = cls._brand(user_input)
                     variant["sizes"] = sizes
@@ -420,6 +468,22 @@ class CardGenerator:
         characteristics.append({"id": charc_id, "value": value})
 
     @staticmethod
+    def _variant_color_suffix(variant: dict[str, Any], color_charc_id: int | None) -> str | None:
+        if color_charc_id is None:
+            return None
+        for item in variant.get("characteristics") or []:
+            if not isinstance(item, dict) or int(item.get("id") or 0) != color_charc_id:
+                continue
+            raw_value = item.get("value")
+            if isinstance(raw_value, list):
+                color_value = next((str(entry).strip() for entry in raw_value if str(entry).strip()), "")
+            else:
+                color_value = str(raw_value or "").strip()
+            if color_value:
+                return ProductIntentParser.display_value_from_color(color_value)
+        return None
+
+    @staticmethod
     def _ensure_unique_vendor_codes(variants: list[dict[str, Any]]) -> None:
         seen: dict[str, int] = {}
         for variant in variants:
@@ -429,3 +493,26 @@ class CardGenerator:
             if count:
                 variant["vendorCode"] = f"{base}-{count + 1}"
             seen[key] = count + 1
+
+    @classmethod
+    def finalize_vendor_codes_from_characteristics(
+        cls,
+        payload: Any,
+        charcs: list[dict[str, Any]],
+    ) -> None:
+        color_charc_id = cls._find_charc_id(charcs, ["Цвет", "color"])
+        if color_charc_id is None:
+            return
+        groups = payload if isinstance(payload, list) else [payload]
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            variants = group.get("cardsToAdd") or group.get("variants") or []
+            for variant in variants:
+                color_suffix = cls._variant_color_suffix(variant, color_charc_id)
+                if not color_suffix:
+                    continue
+                current = str(variant.get("vendorCode") or "AUTO").strip() or "AUTO"
+                base = current.split("/", 1)[0]
+                variant["vendorCode"] = f"{base}/{color_suffix}"
+            cls._ensure_unique_vendor_codes(variants)

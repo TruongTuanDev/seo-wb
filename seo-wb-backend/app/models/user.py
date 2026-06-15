@@ -18,6 +18,8 @@ class User(Base):
     plan_type: Mapped[str] = mapped_column(String(20), default="free", index=True, nullable=False)
     monthly_quota: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
     used_quota: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    monthly_card_quota: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
+    used_card_quota: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     monthly_cost_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
     used_cost: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     credit_balance: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

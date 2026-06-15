@@ -8,7 +8,13 @@ from app.core.errors import AppError
 
 @lru_cache
 def get_redis_client(redis_url: str) -> Redis:
-    return Redis.from_url(redis_url, decode_responses=True)
+    return Redis.from_url(
+        redis_url,
+        decode_responses=True,
+        socket_timeout=10.0,
+        socket_connect_timeout=5.0,
+        health_check_interval=30
+    )
 
 
 def require_redis(settings: Settings) -> Redis:

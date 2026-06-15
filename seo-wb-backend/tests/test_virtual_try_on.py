@@ -562,8 +562,8 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
     )
     assert len(tasks_3) == 3
     assert tasks_3[0]["label"] == "Front"
-    assert tasks_3[1]["label"] == "Lifestyle"
-    assert tasks_3[2]["label"] == "Detail"
+    assert tasks_3[1]["label"] == "Side"
+    assert tasks_3[2]["label"] == "Back"
     
     # 2. Test quantity 6 with back image
     tasks_6_back = build_simplified_catalog_tasks(

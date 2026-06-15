@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ImageDropzone } from "@/components/cards/ImageDropzone";
 import { Characteristic } from "@/components/cards/CharacteristicsEditor";
 import { SizeRow } from "@/components/cards/SizeTable";
 import { ImageGenerationStatus, MediaGallery, RecommendationPayload } from "@/components/cards/MediaGallery";
@@ -19,7 +18,7 @@ import { useCardForm } from "@/hooks/useCardForm";
 import { useDraftAutosave } from "@/hooks/useDraftAutosave";
 import { useJobStatus } from "@/hooks/useJobStatus";
 import { API_BASE, api } from "@/lib/api";
-import { ArrowRight, ArrowLeft, RefreshCw, CheckCircle, UploadCloud } from "lucide-react";
+import { ArrowRight, ArrowLeft, RefreshCw, CheckCircle, UploadCloud, ImagePlus, X } from "lucide-react";
 
 type CreationMode = "create_new" | "add_to_existing_imt" | "create_then_merge";
 
@@ -80,6 +79,27 @@ interface GenerateResponse {
     recommendations?: RecommendationPayload | null;
   };
   card_payload?: GeneratedGroup[];
+  seo_keyword_plan?: {
+    primary_keyword?: string;
+    secondary_keywords?: string[];
+  } | null;
+  seo_score?: {
+    seo_score?: number;
+    title_score?: number;
+    description_score?: number;
+    attributes_score?: number;
+    keyword_coverage_score?: number;
+    issues?: string[];
+    suggestions?: string[];
+    status?: string;
+  } | null;
+  seo_issues?: string[];
+  attribute_confidence?: {
+    confirmed_attributes?: Record<string, unknown>;
+    inferred_attributes?: Record<string, unknown>;
+    missing_attributes?: string[];
+    low_confidence_attributes?: string[];
+  } | null;
 }
 
 interface DraftResponse {
@@ -89,6 +109,10 @@ interface DraftResponse {
   analysis?: {
     recommendations?: RecommendationPayload | null;
   } | null;
+  seo_keyword_plan?: GenerateResponse["seo_keyword_plan"];
+  seo_score?: GenerateResponse["seo_score"];
+  seo_issues?: string[];
+  attribute_confidence?: GenerateResponse["attribute_confidence"];
 }
 
 interface ImageGenerationJob {
@@ -206,6 +230,72 @@ function findCharacteristicValue(characteristics: Characteristic[], names: strin
   return item ? valueText(item.value) : "";
 }
 
+function ReferenceImageInput({
+  label,
+  required,
+  file,
+  onChange,
+  onRemove,
+}: {
+  label: string;
+  required?: boolean;
+  file: File | null;
+  onChange: (file: File | null) => void;
+  onRemove: () => void;
+}) {
+  const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+
+  useEffect(() => {
+    if (!previewUrl) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  return (
+    <label className="group relative flex min-h-48 cursor-pointer flex-col overflow-hidden rounded-xl border border-dashed border-zinc-300 bg-white transition-colors hover:border-brand hover:bg-indigo-50/30">
+      {previewUrl ? (
+        <div className="relative h-40 w-full bg-zinc-100">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={previewUrl} alt={label} className="h-full w-full object-contain p-2" />
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onRemove();
+            }}
+            className="absolute right-2 top-2 rounded-full bg-rose-600 p-1.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ) : (
+        <div className="flex h-40 flex-col items-center justify-center p-4 text-center text-zinc-500">
+          <ImagePlus size={28} className="mb-3" />
+          <span className="text-sm font-medium">{label}</span>
+          <span className="mt-1 text-xs">JPG, PNG, WEBP</span>
+        </div>
+      )}
+      <div className="flex min-h-16 flex-col justify-center px-4 py-3">
+        <span className="text-sm font-medium text-zinc-900">
+          {label} {required && <span className="text-brand">*</span>}
+        </span>
+        <span className="mt-1 line-clamp-1 text-xs text-zinc-500">
+          {file ? file.name : required ? "Required for analysis and generation" : "Optional back reference"}
+        </span>
+      </div>
+      <input
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={(event) => {
+          onChange(event.target.files?.[0] || null);
+          event.target.value = "";
+        }}
+      />
+    </label>
+  );
+}
+
 export function CreateCardClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -258,6 +348,10 @@ export function CreateCardClient() {
   const [imageGenerationJobs, setImageGenerationJobs] = useState<Record<string, ImageGenerationJob>>({});
   const completedImageJobsRef = React.useRef<Set<string>>(new Set());
   const [recommendations, setRecommendations] = useState<RecommendationPayload | null>(null);
+  const [, setSeoKeywordPlan] = useState<GenerateResponse["seo_keyword_plan"] | null>(null);
+  const [seoScore, setSeoScore] = useState<GenerateResponse["seo_score"] | null>(null);
+  const [, setSeoIssues] = useState<string[]>([]);
+  const [, setAttributeConfidence] = useState<GenerateResponse["attribute_confidence"] | null>(null);
 
   useEffect(() => {
     return () => {
@@ -274,6 +368,77 @@ export function CreateCardClient() {
   const closeZoomImage = () => {
     setZoomImageUrl(null);
   };
+
+  const applyDraftResponse = async (draft: DraftResponse) => {
+    const group = draft.card_payload?.[0];
+    const resolvedSubjectId = group?.subjectID || draft.subject_id || 0;
+    let loadedCharcSchema: WbCharacteristicSchema[] = [];
+    if (resolvedSubjectId) {
+      const charcSchemaResponse = await api.get(`/wb/subjects/${resolvedSubjectId}/charcs?store_id=${storeId}`);
+      loadedCharcSchema = charcSchemaResponse?.data || charcSchemaResponse || [];
+      setCharcSchema(loadedCharcSchema);
+    }
+    const rawVariants = group?.variants || [];
+    const loadedVariants = await Promise.all(rawVariants.map(async (variant: GeneratedVariant, index: number) => {
+      const mappedCharcs = (variant.characteristics || []).map((item: GeneratedCharacteristic) => ({
+        id: Number(item.id || 0),
+        name: item.name || charcNameById(loadedCharcSchema, Number(item.id || 0)) || `Characteristic ${item.id}`,
+        value: Array.isArray(item.value) ? item.value.join("; ") : String(item.value || ""),
+      }));
+      const variantColor = findCharacteristicValue(mappedCharcs, ["Ð¦Ð²ÐµÑ‚", "color"]);
+      return {
+        id: crypto.randomUUID(),
+        title: variant.title || "",
+        description: variant.description || "",
+        vendorCode: variant.vendorCode || "",
+        color: variantColor,
+        images: await loadDraftImages(variant, index),
+        characteristics: mappedCharcs,
+        sizes: (variant.sizes || []).map((size: GeneratedSize) => ({
+          techSize: String(size.techSize || "").trim(),
+          wbSize: String(size.wbSize || "").trim(),
+          sku: size.skus?.[0] || size.sku || "",
+        })),
+      };
+    }));
+
+    setDraftId(draft.id);
+    setRecommendations(draft.analysis?.recommendations || null);
+    setSeoKeywordPlan(draft.seo_keyword_plan || null);
+    setSeoScore(draft.seo_score || null);
+    setSeoIssues(draft.seo_issues || []);
+    setAttributeConfidence(draft.attribute_confidence || null);
+    setSubjectId(resolvedSubjectId);
+    setVariants(loadedVariants);
+    const selectedIndex = Number.isFinite(variantIndexParam) ? variantIndexParam : 0;
+    const selectedVariant = loadedVariants[selectedIndex] || loadedVariants[0];
+    const selectedPayloadVariant = rawVariants[selectedIndex] || rawVariants[0];
+    if (selectedVariant) {
+      setActiveVariantId(selectedVariant.id);
+      setGeneratedTitle(selectedVariant.title);
+      setGeneratedDesc(selectedVariant.description);
+      setVendorCode(selectedVariant.vendorCode);
+      setCharcs(selectedVariant.characteristics);
+      setSizes(selectedVariant.sizes);
+      setImages(selectedVariant.images);
+      setColor(selectedVariant.color);
+      const loadedGender = findCharacteristicValue(selectedVariant.characteristics, ["ÐŸÐ¾Ð»", "gender"]);
+      if (loadedGender) setGender(loadedGender);
+    }
+    if (selectedPayloadVariant?.brand) {
+      setBrand(selectedPayloadVariant.brand);
+    }
+    if (selectedPayloadVariant?.dimensions) {
+      setDimensions({
+        length: selectedPayloadVariant.dimensions.length || 0,
+        width: selectedPayloadVariant.dimensions.width || 0,
+        height: selectedPayloadVariant.dimensions.height || 0,
+        weightBrutto: selectedPayloadVariant.dimensions.weightBrutto || 0,
+      });
+    }
+    setCurrentStep(2);
+  };
+  void applyDraftResponse;
 
   useEffect(() => {
     if (!draftIdParam) return;
@@ -315,6 +480,10 @@ export function CreateCardClient() {
 
         setDraftId(draft.id);
         setRecommendations(draft.analysis?.recommendations || null);
+        setSeoKeywordPlan(draft.seo_keyword_plan || null);
+        setSeoScore(draft.seo_score || null);
+        setSeoIssues(draft.seo_issues || []);
+        setAttributeConfidence(draft.attribute_confidence || null);
         setSubjectId(resolvedSubjectId);
         setVariants(loadedVariants);
         const selectedIndex = Number.isFinite(variantIndexParam) ? variantIndexParam : 0;
@@ -517,6 +686,24 @@ export function CreateCardClient() {
   };
 
   const effectiveBrand = () => brand.trim() || "Нет бренда";
+  const frontImage = images[0] || null;
+  const backImage = images[1] || null;
+
+  const setReferenceImage = (index: 0 | 1, file: File | null) => {
+    setImages((current) => {
+      const next = [...current];
+      if (file) {
+        next[index] = file;
+      } else {
+        next.splice(index, 1);
+      }
+      return next.filter(Boolean).slice(0, 2);
+    });
+  };
+
+  const removeReferenceImage = (index: 0 | 1) => {
+    setImages((current) => current.filter((_, imageIndex) => imageIndex !== index));
+  };
 
   const buildVariantPayload = (variant: VariantCardState = activeVariant) => ({
     vendorCode: variant.vendorCode.trim(),
@@ -642,7 +829,7 @@ export function CreateCardClient() {
         sizes: sizes.map(s => s.techSize || s.wbSize).filter(Boolean),
         dimensions: {},
         note,
-        attributes: {}
+        attributes: {},
       };
       
       formData.append("product_input_json", JSON.stringify(payload));
@@ -652,6 +839,10 @@ export function CreateCardClient() {
       
       setDraftId(response.draft_id || 1);
       setRecommendations(response.analysis?.recommendations || null);
+      setSeoKeywordPlan(response.seo_keyword_plan || null);
+      setSeoScore(response.seo_score || null);
+      setSeoIssues(response.seo_issues || []);
+      setAttributeConfidence(response.attribute_confidence || null);
       setAiAnalysis(JSON.stringify(response.analysis || {}, null, 2));
       const generatedVariants = response.card_payload?.[0]?.variants || [];
       const generatedVariant = generatedVariants[0];
@@ -727,7 +918,7 @@ export function CreateCardClient() {
       setJobId(null);
 
       setCurrentStep(2); // Move to Edit
-      success("Generation Complete");
+      success("AI đã tối ưu nội dung tự động");
     } catch (err: unknown) {
       error("Generation failed", getErrorMessage(err));
       setCurrentStep(0); // Back to inputs
@@ -755,7 +946,7 @@ export function CreateCardClient() {
   const handleGenerateVariantImages = async (
     variant: VariantCardState,
     input: {
-      frontImage: File;
+      frontImage?: File;
       backImage?: File;
       modelImage?: File;
       modelId?: string;
@@ -795,7 +986,9 @@ export function CreateCardClient() {
       formData.append("selectedModelBodyType", input.selectedModelBodyType || "");
       formData.append("style", input.backgroundStyle || "studio");
       formData.append("autoGenerateModel", input.autoGenerateModel ? "true" : "false");
-      formData.append("productFrontImage", input.frontImage);
+      if (input.frontImage) {
+        formData.append("productFrontImage", input.frontImage);
+      }
       if (input.backImage) {
         formData.append("productBackImage", input.backImage);
       }
@@ -813,7 +1006,9 @@ export function CreateCardClient() {
       formData.append("selectedModelBodyType", input.selectedModelBodyType || "");
       formData.append("posePack", input.posePack || "");
       formData.append("backgroundStyle", input.backgroundStyle || "none");
-      formData.append("productFrontImage", input.frontImage);
+      if (input.frontImage) {
+        formData.append("productFrontImage", input.frontImage);
+      }
       if (input.backImage) {
         formData.append("productBackImage", input.backImage);
       }
@@ -826,7 +1021,9 @@ export function CreateCardClient() {
     } else {
       endpoint = `/cards/drafts/${draftId}/image-generation/jobs`;
       formData.append("metadata_json", JSON.stringify(buildImageGenerationMetadata(variant)));
-      formData.append("front_image", input.frontImage);
+      if (input.frontImage) {
+        formData.append("front_image", input.frontImage);
+      }
       if (input.backImage) {
         formData.append("back_image", input.backImage);
       }
@@ -973,7 +1170,24 @@ export function CreateCardClient() {
                 <UploadCloud className="text-brand" size={20} /> Product Images
               </h2>
             </div>
-            <ImageDropzone files={images} onChange={setImages} maxFiles={2} />
+            <div className="grid gap-4">
+              <ReferenceImageInput
+                label="Front Product Image"
+                required
+                file={frontImage}
+                onChange={(file) => setReferenceImage(0, file)}
+                onRemove={() => removeReferenceImage(0)}
+              />
+              <ReferenceImageInput
+                label="Back Product Image"
+                file={backImage}
+                onChange={(file) => setReferenceImage(1, file)}
+                onRemove={() => removeReferenceImage(1)}
+              />
+            </div>
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+              Upload front and back product photos, then the system will analyze the garment and auto-generate attributes, title, description, and SEO suggestions for you.
+            </div>
           </div>
         </aside>
 
@@ -1000,13 +1214,16 @@ export function CreateCardClient() {
               )}
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-700">User Setup Prompts / Notes (Optional)</label>
+                <label className="text-sm font-medium text-zinc-700">Optional Notes</label>
                 <textarea
                   value={note}
                   onChange={e => setNote(e.target.value)}
-                  placeholder="e.g. женские брюки, черный цвет, хлопок, высокая посадка"
+                  placeholder="Leave empty for the fastest flow, or add a short note only if you want to steer the AI."
                   className="h-28 w-full rounded-md border border-zinc-300 bg-white p-3 text-sm text-zinc-900 shadow-soft-sm transition-colors duration-150 placeholder:text-zinc-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-indigo-100"
                 />
+                <p className="text-xs text-zinc-500">
+                  This is optional. The default flow is image-first: upload product photos and let AI infer most details automatically.
+                </p>
               </div>
             </div>
           </div>
@@ -1037,6 +1254,11 @@ export function CreateCardClient() {
 
   const renderEdit = () => (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+       {seoScore && (
+         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-soft-sm">
+           AI đã tối ưu nội dung tự động{seoScore?.seo_score ? ` (SEO ${seoScore.seo_score})` : ""}.
+         </div>
+       )}
        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[260px_minmax(0,1fr)_320px]">
           <VariantSidebar
             variants={variants}

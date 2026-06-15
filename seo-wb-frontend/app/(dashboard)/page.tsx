@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useStore } from "@/contexts/StoreContext";
 import { api } from "@/lib/api";
+import { FINANCE_ENABLED } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
 type UsageSummary = {
@@ -18,6 +19,10 @@ type UsageSummary = {
   used_quota: number;
   remaining_quota: number;
   quota_percent: number;
+  monthly_card_quota: number;
+  used_card_quota: number;
+  remaining_card_quota: number;
+  card_quota_percent: number;
   monthly_cost_limit: number | null;
   used_cost: number;
   remaining_cost: number | null;
@@ -110,13 +115,13 @@ export default function DashboardPage() {
       desc: t("createCardDesc"),
       href: sid ? `/cards/new?store_id=${sid}` : "/cards/new",
     },
-    {
+    ...(FINANCE_ENABLED ? [{
       icon: BarChart2,
       color: "bg-emerald-50 text-emerald-600",
       title: t("viewFinance"),
       desc: t("viewFinanceDesc"),
       href: "/finance",
-    },
+    }] : []),
     {
       icon: Settings,
       color: "bg-zinc-100 text-zinc-600",
@@ -140,36 +145,69 @@ export default function DashboardPage() {
         )}
         {usage && (
           <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-soft-sm">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="font-medium text-zinc-700">Plan {usage.plan_type.toUpperCase()}</span>
-              <span className="text-zinc-500">{usage.used_quota} / {usage.monthly_quota}</span>
+            <div className="flex items-center justify-between gap-3 text-sm border-b border-zinc-100 pb-2">
+              <span className="font-semibold text-zinc-800">Plan {usage.plan_type.toUpperCase()}</span>
+              <span className="text-xs text-zinc-500">
+                Next reset: {usage.quota_reset_at ? new Date(usage.quota_reset_at).toLocaleDateString() : "Not scheduled"}
+              </span>
             </div>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200">
-              <div className="h-full rounded-full bg-brand" style={{ width: `${Math.min(100, usage.quota_percent)}%` }} />
+
+            {/* Image Quota */}
+            <div className="mt-3">
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="text-zinc-500 font-medium">Image Generations</span>
+                <span className="text-zinc-700 font-medium">{usage.used_quota} / {usage.monthly_quota}</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-zinc-200">
+                <div className="h-full rounded-full bg-brand" style={{ width: `${Math.min(100, usage.quota_percent)}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">Remaining: {usage.remaining_quota} generated images this cycle.</p>
             </div>
-            <p className="mt-2 text-xs text-zinc-500">Remaining: {usage.remaining_quota} generated images this cycle.</p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Max/job: {usage.max_images_per_job} · GPT image: {usage.allow_gpt_image ? "enabled" : "disabled"} · Legacy VTON: {usage.allow_legacy_vton ? "enabled" : "disabled"}
-            </p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Next reset: {usage.quota_reset_at ? new Date(usage.quota_reset_at).toLocaleDateString() : "Not scheduled"}
-            </p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Credits: {usage.credit_balance} available · {usage.credits_used} used this cycle
-            </p>
+
+            {/* Card Quota */}
+            <div className="mt-4 border-t border-zinc-100 pt-3">
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="text-zinc-500 font-medium">Card Creations (Wildberries)</span>
+                <span className="text-zinc-700 font-medium">{usage.used_card_quota} / {usage.monthly_card_quota}</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-zinc-200">
+                <div className="h-full rounded-full bg-indigo-600" style={{ width: `${Math.min(100, usage.card_quota_percent)}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">Remaining: {usage.remaining_card_quota} cards published this cycle.</p>
+            </div>
+
+            <div className="mt-4 border-t border-zinc-100 pt-3 text-xs text-zinc-500 space-y-1">
+              <p>
+                Max/job: {usage.max_images_per_job} · GPT image: {usage.allow_gpt_image ? "enabled" : "disabled"} · Legacy VTON: {usage.allow_legacy_vton ? "enabled" : "disabled"}
+              </p>
+              <p>
+                Credits: {usage.credit_balance} available · {usage.credits_used} used this cycle
+              </p>
+            </div>
+
             {usage.monthly_quota > 0 && usage.used_quota >= usage.monthly_quota && (
               <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                Upgrade plan or contact admin.
+                Upgrade plan or contact admin (Image quota exceeded).
+              </div>
+            )}
+            {usage.monthly_card_quota > 0 && usage.used_card_quota >= usage.monthly_card_quota && (
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                Upgrade plan or contact admin (Card creation quota exceeded).
               </div>
             )}
             {usage.monthly_cost_limit !== null && usage.used_cost >= usage.monthly_cost_limit && (
               <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                Upgrade plan or contact admin.
+                Upgrade plan or contact admin (Monthly cost limit exceeded).
               </div>
             )}
             {usage.monthly_quota > 0 && usage.used_quota / usage.monthly_quota >= 0.8 && usage.used_quota < usage.monthly_quota && (
               <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
                 You are close to your monthly image limit.
+              </div>
+            )}
+            {usage.monthly_card_quota > 0 && usage.used_card_quota / usage.monthly_card_quota >= 0.8 && usage.used_card_quota < usage.monthly_card_quota && (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                You are close to your monthly card creation limit.
               </div>
             )}
             {usage.monthly_cost_limit !== null && usage.monthly_cost_limit > 0 && usage.used_cost / usage.monthly_cost_limit >= 0.8 && usage.used_cost < usage.monthly_cost_limit && (

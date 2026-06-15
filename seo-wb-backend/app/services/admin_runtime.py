@@ -20,6 +20,20 @@ class EffectiveAiRuntimeSettings:
     validation_threshold: int
     validation_failure_behavior: str
     allow_legacy_vton: bool
+    seo_engine_enabled: bool
+    seo_min_score: int
+    description_min_chars: int
+    description_max_chars: int
+    seo_repair_max_attempts: int
+    require_primary_keyword_in_title: bool
+    warn_low_confidence_attributes: bool
+    enable_russian_grammar_validation: bool
+    enable_keyword_stuffing_detection: bool
+    enable_subject_title_templates: bool
+    include_gender_in_title: bool
+    minimum_grammar_score: int
+    minimum_marketplace_score: int
+    minimum_critical_attribute_score: int
 
 
 def get_or_create_admin_ai_settings(db: Session) -> AdminAiSettings:
@@ -45,6 +59,20 @@ def get_effective_ai_runtime_settings(db: Session, settings: Settings) -> Effect
         validation_threshold=max(0, min(100, row.validation_threshold)),
         validation_failure_behavior=row.validation_failure_behavior if row.validation_failure_behavior in {"block", "warn"} else "warn",
         allow_legacy_vton=bool(row.allow_legacy_vton),
+        seo_engine_enabled=bool(row.seo_engine_enabled),
+        seo_min_score=max(0, min(100, row.seo_min_score)),
+        description_min_chars=max(200, row.description_min_chars),
+        description_max_chars=max(max(200, row.description_min_chars), row.description_max_chars),
+        seo_repair_max_attempts=max(0, row.seo_repair_max_attempts),
+        require_primary_keyword_in_title=bool(row.require_primary_keyword_in_title),
+        warn_low_confidence_attributes=bool(row.warn_low_confidence_attributes),
+        enable_russian_grammar_validation=bool(row.enable_russian_grammar_validation),
+        enable_keyword_stuffing_detection=bool(row.enable_keyword_stuffing_detection),
+        enable_subject_title_templates=bool(row.enable_subject_title_templates),
+        include_gender_in_title=bool(row.include_gender_in_title),
+        minimum_grammar_score=max(0, min(100, row.minimum_grammar_score)),
+        minimum_marketplace_score=max(0, min(100, row.minimum_marketplace_score)),
+        minimum_critical_attribute_score=max(0, min(100, row.minimum_critical_attribute_score)),
     )
 
 
@@ -56,11 +84,12 @@ def list_public_model_templates(db: Session, settings: Settings, garment_type: s
     )
     if garment_type:
         from sqlalchemy import or_
+
         query = query.where(
             or_(
                 ModelTemplate.garment_type == garment_type,
                 ModelTemplate.garment_type == "full_body",
-                ModelTemplate.garment_type.is_(None)
+                ModelTemplate.garment_type.is_(None),
             )
         )
     rows = db.scalars(query.order_by(ModelTemplate.created_at.desc())).all()
@@ -99,7 +128,7 @@ def _public_model_item(model: ModelTemplate) -> dict:
         "frontImageUrl": front_image_url,
         "imageUrl": front_image_url,
         "label": f"{gender} - {body_type}",
-        "description": " • ".join(description_parts) if description_parts else model.name,
+        "description": " - ".join(description_parts) if description_parts else model.name,
         "availablePoses": available_poses,
         "isAiGenerated": bool(model.is_ai_generated),
         "garmentType": model.garment_type or "full_body",

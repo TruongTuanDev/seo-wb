@@ -152,6 +152,42 @@ async def test_finance_automation_scheduler_enqueues_bootstrap_and_missing_daily
 
 
 @pytest.mark.anyio
+async def test_finance_automation_scheduler_waits_before_retrying_failed_bootstrap(tmp_path):
+    SessionLocal = _build_session(tmp_path)
+    settings = Settings(
+        app_env="test",
+        app_secret_key="test-secret-key",
+        encryption_key="0123456789abcdef0123456789abcdef",
+        database_url=f"sqlite:///{tmp_path / 'bootstrap.db'}",
+        cookie_secure=False,
+        finance_failed_retry_seconds=3600,
+    )
+    store_id = _create_store(SessionLocal, settings)
+    now = datetime(2026, 5, 19, 1, 0, tzinfo=UTC)
+
+    with SessionLocal() as db:
+        seller = Seller(store_id=store_id, name="Seller")
+        db.add(seller)
+        db.commit()
+        db.refresh(seller)
+        db.add(
+            SellerFinanceAutomationState(
+                seller_id=seller.id,
+                timezone="Europe/Moscow",
+                bootstrap_status="failed",
+                bootstrap_finished_at=now,
+            )
+        )
+        db.commit()
+
+    redis = FakeRedis()
+    service = FinanceAutomationService(settings, SessionLocal, redis)
+
+    assert await service.run_scheduler_cycle_async(now=now) == 0
+    assert redis.queue == []
+
+
+@pytest.mark.anyio
 async def test_finance_automation_bootstrap_runs_product_then_finance_and_updates_state(tmp_path, monkeypatch):
     SessionLocal = _build_session(tmp_path)
     settings = Settings(
@@ -187,7 +223,7 @@ async def test_finance_automation_bootstrap_runs_product_then_finance_and_update
     assert len(published_jobs) == 1
     assert published_jobs[0] == ("product.sync", store_id, {"full": True}, "product.sync")
 
-    # Simulate Go finishing both active_cards product sync and daily finance sync
+    # Simulate the RabbitMQ sync worker finishing product and finance sync.
     with SessionLocal() as db:
         seller = db.query(Seller).one()
         db.add(WbProductSyncState(

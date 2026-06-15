@@ -1,3 +1,5 @@
+import { FINANCE_ENABLED } from "@/lib/features";
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 const CSRF_COOKIE_NAME = process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME || "seller_wb_csrf";
 const ADMIN_CSRF_COOKIE_NAME = process.env.NEXT_PUBLIC_ADMIN_CSRF_COOKIE_NAME || "seller_wb_admin_csrf";
@@ -47,6 +49,10 @@ function formatApiError(value: unknown): string {
 }
 
 async function fetchWithAuth(url: string, options: ApiOptions = {}) {
+  if (!FINANCE_ENABLED && (url === "/finance" || url.startsWith("/finance/") || url.startsWith("/finance?"))) {
+    throw new Error("Finance feature is currently unavailable.");
+  }
+
   const { requireAuth = true, redirectOnUnauthorized = true, authScope, headers, ...rest } = options;
 
   const finalHeaders = new Headers(headers);
@@ -74,7 +80,14 @@ async function fetchWithAuth(url: string, options: ApiOptions = {}) {
     if (response.status === 401 && requireAuth && redirectOnUnauthorized && typeof window !== "undefined") {
       window.location.href = "/login";
     }
-    let errorMsg = "An error occurred";
+    const rawBody = await response.text();
+    const contentType = response.headers.get("content-type") || "";
+    const isHtmlResponse = contentType.includes("text/html") || /^\s*<!doctype html/i.test(rawBody);
+    const fallbackText = rawBody.trim().replace(/\s+/g, " ");
+    let errorMsg = isHtmlResponse
+      ? `API request failed (${response.status}). The server returned HTML instead of JSON.`
+      : fallbackText.slice(0, 500) || response.statusText || "An error occurred";
+
     try {
       const errorData = await response.json();
       errorMsg = formatApiError(
@@ -92,7 +105,7 @@ async function fetchWithAuth(url: string, options: ApiOptions = {}) {
         }
       }
     } catch {
-      errorMsg = await response.text() || response.statusText;
+      // Keep the raw text because a Response body can only be consumed once.
     }
     throw new Error(errorMsg);
   }

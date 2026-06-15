@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -10,7 +10,7 @@ from app.api.routes import admin, auth, cards, finance, public, stores, wb
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.rate_limit import FixedWindowRateLimiter, client_ip
-from app.db.session import SessionLocal, init_db
+from app.db.session import get_db, init_db
 from app.services.billing_foundation import ensure_subscription_plan_seeds
 from app.services.wb_client import close_wb_clients
 
@@ -26,9 +26,12 @@ global_limiter = FixedWindowRateLimiter(
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    init_db()
-    with SessionLocal() as db:
+async def lifespan(app: FastAPI):
+    db_dependency = app.dependency_overrides.get(get_db, get_db)
+    if db_dependency is get_db:
+        init_db()
+    # Respect the test database override during startup seeding.
+    with contextmanager(db_dependency)() as db:
         ensure_subscription_plan_seeds(db)
         from app.services.admin_runtime import ensure_builtin_model_seeds
         ensure_builtin_model_seeds(db)

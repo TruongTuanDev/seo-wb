@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, startTransition, useEffect, useState } from "react";
+import { ChangeEvent, startTransition, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { AdminShell } from "@/components/admin/AdminShell";
@@ -25,6 +25,7 @@ type ModelTemplate = {
 const initialForm = {
   name: "",
   garment_type: "",
+  gender: "female",
 };
 
 const slugify = (text: string) => {
@@ -65,11 +66,21 @@ const getImageUrl = (url: string | null | undefined) => {
 };
 
 function ModelCard({ model, onEdit, onDelete }: { model: ModelTemplate; onEdit: (model: ModelTemplate) => void; onDelete: (id: string) => void }) {
-  const [activeImage, setActiveImage] = useState<string | null>(model.reference_image_url || null);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const availableImages = useMemo(() => {
+    const images = [
+      model.reference_image_url,
+      ...Object.values(model.poses || {}),
+    ].filter((value): value is string => Boolean(value));
+    return Array.from(new Set(images));
+  }, [model.poses, model.reference_image_url]);
 
-  useEffect(() => {
-    setActiveImage(model.reference_image_url || null);
-  }, [model.reference_image_url]);
+  const activeImage = useMemo(() => {
+    if (selectedImage && availableImages.includes(selectedImage)) {
+      return selectedImage;
+    }
+    return model.reference_image_url || availableImages[0] || null;
+  }, [availableImages, model.reference_image_url, selectedImage]);
 
   return (
     <article className="rounded-[24px] border border-stone-200 bg-white p-5 flex flex-col justify-between">
@@ -92,7 +103,7 @@ function ModelCard({ model, onEdit, onDelete }: { model: ModelTemplate; onEdit: 
             {model.reference_image_url && (
               <button
                 type="button"
-                onClick={() => setActiveImage(model.reference_image_url || null)}
+                onClick={() => setSelectedImage(model.reference_image_url || null)}
                 className={`relative h-12 w-12 flex-shrink-0 rounded-lg overflow-hidden border transition-all ${
                   activeImage === model.reference_image_url ? "border-indigo-600 ring-2 ring-indigo-100" : "border-stone-200"
                 }`}
@@ -111,7 +122,7 @@ function ModelCard({ model, onEdit, onDelete }: { model: ModelTemplate; onEdit: 
                 <button
                   key={poseName}
                   type="button"
-                  onClick={() => setActiveImage(url)}
+                  onClick={() => setSelectedImage(url)}
                   className={`relative h-12 w-12 flex-shrink-0 rounded-lg overflow-hidden border transition-all ${
                     activeImage === url ? "border-indigo-600 ring-2 ring-indigo-100" : "border-stone-200"
                   }`}
@@ -132,6 +143,9 @@ function ModelCard({ model, onEdit, onDelete }: { model: ModelTemplate; onEdit: 
           <h3 className="text-lg font-semibold text-stone-950">{model.name}</h3>
           <p className="mt-1 text-sm text-stone-500">
             Loại: <span className="font-medium text-stone-700">{getGarmentTypeLabel(model.garment_type)}</span>
+          </p>
+          <p className="mt-0.5 text-sm text-stone-500">
+            Giới tính: <span className="font-medium text-stone-700">{model.gender === "male" ? "Nam" : "Nữ"}</span>
           </p>
         </div>
       </div>
@@ -178,6 +192,7 @@ export default function AdminModelsPage() {
     setForm({
       name: model.name,
       garment_type: model.garment_type || "",
+      gender: model.gender || "female",
     });
     setEditingPoses(model.poses || {});
     setReferenceImages([]);
@@ -205,7 +220,7 @@ export default function AdminModelsPage() {
     body.set("payload_json", JSON.stringify({
       id: slug,
       name: form.name,
-      gender: "female",
+      gender: form.gender || "female",
       body_type: "average",
       height_cm: null,
       weight_kg: null,
@@ -277,6 +292,18 @@ export default function AdminModelsPage() {
                 <option value="shirt">Áo (Shirt/Top)</option>
                 <option value="shoes">Giày (Shoes)</option>
                 <option value="suit">Bộ quần áo (Suit/Outfit)</option>
+              </select>
+            </label>
+            
+            <label className="block text-sm font-medium text-stone-700">
+              Giới tính
+              <select
+                className="mt-1 block w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm"
+                value={form.gender}
+                onChange={(e) => setForm((s) => ({ ...s, gender: e.target.value }))}
+              >
+                <option value="female">Nữ (Female)</option>
+                <option value="male">Nam (Male)</option>
               </select>
             </label>
             

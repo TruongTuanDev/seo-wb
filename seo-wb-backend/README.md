@@ -11,6 +11,17 @@ FastAPI backend for the flow:
 7. Backend validates and pushes the card to Wildberries.
 8. Optional Redis-backed image generation creates product-card media and attaches it to the draft.
 
+## Product-card generation source of truth
+
+Before changing card generation, SEO, subjects, characteristics, variants,
+titles, descriptions, or vendor-code behavior, read:
+
+- [`../docs/WB_SEO_SOURCE_OF_TRUTH.md`](../docs/WB_SEO_SOURCE_OF_TRUTH.md)
+
+It contains the current WB sources, project-specific marketplace rules,
+subject-driven architecture contract, known gaps, and required tests. Older
+prompts and generic SEO assumptions must not override that document.
+
 Wildberries card creation is asynchronous. Images are not part of `/content/v2/cards/upload`; upload media after WB returns/creates an `nmID`.
 
 ## Run
@@ -31,6 +42,12 @@ Run the image generation worker in a second terminal when using AI-generated med
 cd backend
 .\.venv\Scripts\Activate.ps1
 python -m app.workers.image_generation_worker
+```
+
+Run the RabbitMQ sync worker for card push, product sync, and finance sync:
+
+```powershell
+python -m app.workers.wb_sync_worker
 ```
 
 ## Database

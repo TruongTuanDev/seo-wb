@@ -1,0 +1,280 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Check deploy secrets
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
+          APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+        run: |
+          missing=0
+          for key in VPS_HOST VPS_USER VPS_SSH_PRIVATE_KEY POSTGRES_PASSWORD RABBITMQ_PASSWORD APP_SECRET_KEY ENCRYPTION_KEY NEXT_PUBLIC_API_URL
+          do
+            if [ -z "${!key}" ]; then
+              echo "Missing required secret: $key"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts || true
+
+      - name: Test SSH login
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            "${VPS_USER}@${VPS_HOST}" \
+            "echo 'SSH login OK for monorepo deploy'"
+
+      - name: Build deploy env files
+        env:
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          RABBITMQ_USERNAME: ${{ secrets.RABBITMQ_USERNAME }}
+          RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
+          RABBITMQ_VHOST: ${{ secrets.RABBITMQ_VHOST }}
+          BACKEND_BIND_ADDRESS: ${{ secrets.BACKEND_BIND_ADDRESS }}
+          BACKEND_HTTP_PORT: ${{ secrets.BACKEND_HTTP_PORT }}
+          FRONTEND_BIND_ADDRESS: ${{ secrets.FRONTEND_BIND_ADDRESS }}
+          FRONTEND_HTTP_PORT: ${{ secrets.FRONTEND_HTTP_PORT }}
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_CSRF_COOKIE_NAME: ${{ secrets.NEXT_PUBLIC_CSRF_COOKIE_NAME }}
+          NEXT_PUBLIC_ENABLE_FINANCE: ${{ secrets.NEXT_PUBLIC_ENABLE_FINANCE }}
+          APP_NAME: ${{ secrets.APP_NAME }}
+          APP_ENV: ${{ secrets.APP_ENV }}
+          APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
+          JWT_EXPIRE_MINUTES: ${{ secrets.JWT_EXPIRE_MINUTES }}
+          JWT_BIND_USER_AGENT: ${{ secrets.JWT_BIND_USER_AGENT }}
+          CORS_ALLOW_ORIGINS: ${{ secrets.CORS_ALLOW_ORIGINS }}
+          COOKIE_DOMAIN: ${{ secrets.COOKIE_DOMAIN }}
+          COOKIE_SECURE: ${{ secrets.COOKIE_SECURE }}
+          COOKIE_SAMESITE: ${{ secrets.COOKIE_SAMESITE }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_CARD_MODEL: ${{ secrets.OPENAI_CARD_MODEL }}
+          OPENAI_IMAGE_MODEL: ${{ secrets.OPENAI_IMAGE_MODEL }}
+          OPENAI_IMAGE_CONCURRENCY: ${{ secrets.OPENAI_IMAGE_CONCURRENCY }}
+          OPENAI_IMAGE_RETRY_ATTEMPTS: ${{ secrets.OPENAI_IMAGE_RETRY_ATTEMPTS }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          WB_CONTENT_BASE_URL: ${{ secrets.WB_CONTENT_BASE_URL }}
+          WB_FINANCE_API_BASE_URL: ${{ secrets.WB_FINANCE_API_BASE_URL }}
+          WB_COMMON_API_BASE_URL: ${{ secrets.WB_COMMON_API_BASE_URL }}
+          ENABLE_WB_RAW_PROXY: ${{ secrets.ENABLE_WB_RAW_PROXY }}
+          AUTH_COOKIE_NAME: ${{ secrets.AUTH_COOKIE_NAME }}
+          CSRF_COOKIE_NAME: ${{ secrets.CSRF_COOKIE_NAME }}
+          ADMIN_AUTH_COOKIE_NAME: ${{ secrets.ADMIN_AUTH_COOKIE_NAME }}
+          ADMIN_CSRF_COOKIE_NAME: ${{ secrets.ADMIN_CSRF_COOKIE_NAME }}
+          AUTH_RATE_LIMIT_REQUESTS: ${{ secrets.AUTH_RATE_LIMIT_REQUESTS }}
+          AUTH_RATE_LIMIT_WINDOW_SECONDS: ${{ secrets.AUTH_RATE_LIMIT_WINDOW_SECONDS }}
+          GLOBAL_RATE_LIMIT_REQUESTS: ${{ secrets.GLOBAL_RATE_LIMIT_REQUESTS }}
+          GLOBAL_RATE_LIMIT_WINDOW_SECONDS: ${{ secrets.GLOBAL_RATE_LIMIT_WINDOW_SECONDS }}
+          DB_POOL_SIZE: ${{ secrets.DB_POOL_SIZE }}
+          DB_MAX_OVERFLOW: ${{ secrets.DB_MAX_OVERFLOW }}
+          DB_POOL_RECYCLE_SECONDS: ${{ secrets.DB_POOL_RECYCLE_SECONDS }}
+          MAX_GENERATE_IMAGES: ${{ secrets.MAX_GENERATE_IMAGES }}
+          MAX_AI_PRODUCT_IMAGES: ${{ secrets.MAX_AI_PRODUCT_IMAGES }}
+          MAX_UPLOAD_IMAGE_BYTES: ${{ secrets.MAX_UPLOAD_IMAGE_BYTES }}
+          MAX_JOB_FILES: ${{ secrets.MAX_JOB_FILES }}
+          MAX_MEDIA_UPLOAD_BYTES: ${{ secrets.MAX_MEDIA_UPLOAD_BYTES }}
+          MAX_CARD_PAYLOAD_BYTES: ${{ secrets.MAX_CARD_PAYLOAD_BYTES }}
+          MAX_AI_CONCURRENCY: ${{ secrets.MAX_AI_CONCURRENCY }}
+          MAX_BACKGROUND_JOBS: ${{ secrets.MAX_BACKGROUND_JOBS }}
+          ENABLE_IMAGE_VALIDATION_RETRY: ${{ secrets.ENABLE_IMAGE_VALIDATION_RETRY }}
+          GENERATED_IMAGE_JPEG_QUALITY: ${{ secrets.GENERATED_IMAGE_JPEG_QUALITY }}
+          WB_TIMEOUT_SECONDS: ${{ secrets.WB_TIMEOUT_SECONDS }}
+          WB_MEDIA_TIMEOUT_SECONDS: ${{ secrets.WB_MEDIA_TIMEOUT_SECONDS }}
+          WB_MAX_CONNECTIONS: ${{ secrets.WB_MAX_CONNECTIONS }}
+          WB_MAX_KEEPALIVE_CONNECTIONS: ${{ secrets.WB_MAX_KEEPALIVE_CONNECTIONS }}
+          WB_RETRY_ATTEMPTS: ${{ secrets.WB_RETRY_ATTEMPTS }}
+          WB_RETRY_BACKOFF_SECONDS: ${{ secrets.WB_RETRY_BACKOFF_SECONDS }}
+          WB_CATALOG_CACHE_TTL_SECONDS: ${{ secrets.WB_CATALOG_CACHE_TTL_SECONDS }}
+          FINANCE_AUTO_SYNC_TIMEZONE: ${{ secrets.FINANCE_AUTO_SYNC_TIMEZONE }}
+          FINANCE_BOOTSTRAP_LOOKBACK_DAYS: ${{ secrets.FINANCE_BOOTSTRAP_LOOKBACK_DAYS }}
+          FINANCE_SCHEDULER_POLL_SECONDS: ${{ secrets.FINANCE_SCHEDULER_POLL_SECONDS }}
+          FINANCE_SCHEDULER_LEADER_LOCK_SECONDS: ${{ secrets.FINANCE_SCHEDULER_LEADER_LOCK_SECONDS }}
+          FINANCE_AUTO_JOB_LOCK_SECONDS: ${{ secrets.FINANCE_AUTO_JOB_LOCK_SECONDS }}
+          USAGE_RESET_SCHEDULER_POLL_SECONDS: ${{ secrets.USAGE_RESET_SCHEDULER_POLL_SECONDS }}
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+        run: |
+          mkdir -p .tmp-deploy
+          write_env() {
+            local file="$1"
+            local key="$2"
+            local value="$3"
+            printf '%s=%s\n' "$key" "$value" >> "$file"
+          }
+
+          : > .tmp-deploy/compose.env
+          write_env .tmp-deploy/compose.env POSTGRES_DB "${POSTGRES_DB:-seo_wb_db}"
+          write_env .tmp-deploy/compose.env POSTGRES_USER "${POSTGRES_USER:-postgres}"
+          write_env .tmp-deploy/compose.env POSTGRES_PASSWORD "${POSTGRES_PASSWORD}"
+          write_env .tmp-deploy/compose.env RABBITMQ_USERNAME "${RABBITMQ_USERNAME:-sellerwb}"
+          write_env .tmp-deploy/compose.env RABBITMQ_PASSWORD "${RABBITMQ_PASSWORD}"
+          write_env .tmp-deploy/compose.env RABBITMQ_VHOST "${RABBITMQ_VHOST:-sellerwb}"
+          write_env .tmp-deploy/compose.env BACKEND_BIND_ADDRESS "${BACKEND_BIND_ADDRESS:-127.0.0.1}"
+          write_env .tmp-deploy/compose.env BACKEND_HTTP_PORT "${BACKEND_HTTP_PORT:-8000}"
+          write_env .tmp-deploy/compose.env FRONTEND_BIND_ADDRESS "${FRONTEND_BIND_ADDRESS:-127.0.0.1}"
+          write_env .tmp-deploy/compose.env FRONTEND_HTTP_PORT "${FRONTEND_HTTP_PORT:-3000}"
+          write_env .tmp-deploy/compose.env NEXT_PUBLIC_API_URL "${NEXT_PUBLIC_API_URL}"
+          write_env .tmp-deploy/compose.env NEXT_PUBLIC_CSRF_COOKIE_NAME "${NEXT_PUBLIC_CSRF_COOKIE_NAME:-seller_wb_csrf}"
+          write_env .tmp-deploy/compose.env NEXT_PUBLIC_ENABLE_FINANCE "${NEXT_PUBLIC_ENABLE_FINANCE:-false}"
+
+          : > .tmp-deploy/backend.env
+          write_env .tmp-deploy/backend.env APP_NAME "${APP_NAME:-Seller WB AI Backend}"
+          write_env .tmp-deploy/backend.env APP_ENV "${APP_ENV:-production}"
+          write_env .tmp-deploy/backend.env APP_SECRET_KEY "${APP_SECRET_KEY}"
+          write_env .tmp-deploy/backend.env JWT_EXPIRE_MINUTES "${JWT_EXPIRE_MINUTES:-120}"
+          write_env .tmp-deploy/backend.env JWT_BIND_USER_AGENT "${JWT_BIND_USER_AGENT:-true}"
+          write_env .tmp-deploy/backend.env CORS_ALLOW_ORIGINS "${CORS_ALLOW_ORIGINS:-https://app.your-domain.com}"
+          write_env .tmp-deploy/backend.env COOKIE_DOMAIN "${COOKIE_DOMAIN:-.your-domain.com}"
+          write_env .tmp-deploy/backend.env COOKIE_SECURE "${COOKIE_SECURE:-true}"
+          write_env .tmp-deploy/backend.env COOKIE_SAMESITE "${COOKIE_SAMESITE:-lax}"
+          write_env .tmp-deploy/backend.env GEMINI_API_KEY "${GEMINI_API_KEY}"
+          write_env .tmp-deploy/backend.env GEMINI_MODEL "${GEMINI_MODEL:-gemini-2.5-flash}"
+          write_env .tmp-deploy/backend.env OPENAI_API_KEY "${OPENAI_API_KEY}"
+          write_env .tmp-deploy/backend.env OPENAI_CARD_MODEL "${OPENAI_CARD_MODEL}"
+          write_env .tmp-deploy/backend.env OPENAI_IMAGE_MODEL "${OPENAI_IMAGE_MODEL:-gpt-image-2}"
+          write_env .tmp-deploy/backend.env OPENAI_IMAGE_CONCURRENCY "${OPENAI_IMAGE_CONCURRENCY:-2}"
+          write_env .tmp-deploy/backend.env OPENAI_IMAGE_RETRY_ATTEMPTS "${OPENAI_IMAGE_RETRY_ATTEMPTS:-3}"
+          write_env .tmp-deploy/backend.env ENCRYPTION_KEY "${ENCRYPTION_KEY}"
+          write_env .tmp-deploy/backend.env WB_CONTENT_BASE_URL "${WB_CONTENT_BASE_URL:-https://content-api.wildberries.ru}"
+          write_env .tmp-deploy/backend.env WB_FINANCE_API_BASE_URL "${WB_FINANCE_API_BASE_URL:-https://finance-api.wildberries.ru}"
+          write_env .tmp-deploy/backend.env WB_COMMON_API_BASE_URL "${WB_COMMON_API_BASE_URL:-https://common-api.wildberries.ru}"
+          write_env .tmp-deploy/backend.env ENABLE_WB_RAW_PROXY "${ENABLE_WB_RAW_PROXY:-false}"
+          write_env .tmp-deploy/backend.env AUTH_COOKIE_NAME "${AUTH_COOKIE_NAME:-seller_wb_access}"
+          write_env .tmp-deploy/backend.env CSRF_COOKIE_NAME "${CSRF_COOKIE_NAME:-seller_wb_csrf}"
+          write_env .tmp-deploy/backend.env ADMIN_AUTH_COOKIE_NAME "${ADMIN_AUTH_COOKIE_NAME:-seller_wb_admin_access}"
+          write_env .tmp-deploy/backend.env ADMIN_CSRF_COOKIE_NAME "${ADMIN_CSRF_COOKIE_NAME:-seller_wb_admin_csrf}"
+          write_env .tmp-deploy/backend.env AUTH_RATE_LIMIT_REQUESTS "${AUTH_RATE_LIMIT_REQUESTS:-8}"
+          write_env .tmp-deploy/backend.env AUTH_RATE_LIMIT_WINDOW_SECONDS "${AUTH_RATE_LIMIT_WINDOW_SECONDS:-300}"
+          write_env .tmp-deploy/backend.env GLOBAL_RATE_LIMIT_REQUESTS "${GLOBAL_RATE_LIMIT_REQUESTS:-240}"
+          write_env .tmp-deploy/backend.env GLOBAL_RATE_LIMIT_WINDOW_SECONDS "${GLOBAL_RATE_LIMIT_WINDOW_SECONDS:-60}"
+          write_env .tmp-deploy/backend.env DB_POOL_SIZE "${DB_POOL_SIZE:-10}"
+          write_env .tmp-deploy/backend.env DB_MAX_OVERFLOW "${DB_MAX_OVERFLOW:-20}"
+          write_env .tmp-deploy/backend.env DB_POOL_RECYCLE_SECONDS "${DB_POOL_RECYCLE_SECONDS:-1800}"
+          write_env .tmp-deploy/backend.env MAX_GENERATE_IMAGES "${MAX_GENERATE_IMAGES:-8}"
+          write_env .tmp-deploy/backend.env MAX_AI_PRODUCT_IMAGES "${MAX_AI_PRODUCT_IMAGES:-10}"
+          write_env .tmp-deploy/backend.env MAX_UPLOAD_IMAGE_BYTES "${MAX_UPLOAD_IMAGE_BYTES:-10485760}"
+          write_env .tmp-deploy/backend.env MAX_JOB_FILES "${MAX_JOB_FILES:-30}"
+          write_env .tmp-deploy/backend.env MAX_MEDIA_UPLOAD_BYTES "${MAX_MEDIA_UPLOAD_BYTES:-15728640}"
+          write_env .tmp-deploy/backend.env MAX_CARD_PAYLOAD_BYTES "${MAX_CARD_PAYLOAD_BYTES:-2097152}"
+          write_env .tmp-deploy/backend.env MAX_AI_CONCURRENCY "${MAX_AI_CONCURRENCY:-2}"
+          write_env .tmp-deploy/backend.env MAX_BACKGROUND_JOBS "${MAX_BACKGROUND_JOBS:-2}"
+          write_env .tmp-deploy/backend.env ENABLE_IMAGE_VALIDATION_RETRY "${ENABLE_IMAGE_VALIDATION_RETRY:-false}"
+          write_env .tmp-deploy/backend.env GENERATED_IMAGE_JPEG_QUALITY "${GENERATED_IMAGE_JPEG_QUALITY:-88}"
+          write_env .tmp-deploy/backend.env WB_TIMEOUT_SECONDS "${WB_TIMEOUT_SECONDS:-30}"
+          write_env .tmp-deploy/backend.env WB_MEDIA_TIMEOUT_SECONDS "${WB_MEDIA_TIMEOUT_SECONDS:-120}"
+          write_env .tmp-deploy/backend.env WB_MAX_CONNECTIONS "${WB_MAX_CONNECTIONS:-50}"
+          write_env .tmp-deploy/backend.env WB_MAX_KEEPALIVE_CONNECTIONS "${WB_MAX_KEEPALIVE_CONNECTIONS:-20}"
+          write_env .tmp-deploy/backend.env WB_RETRY_ATTEMPTS "${WB_RETRY_ATTEMPTS:-3}"
+          write_env .tmp-deploy/backend.env WB_RETRY_BACKOFF_SECONDS "${WB_RETRY_BACKOFF_SECONDS:-0.5}"
+          write_env .tmp-deploy/backend.env WB_CATALOG_CACHE_TTL_SECONDS "${WB_CATALOG_CACHE_TTL_SECONDS:-900}"
+          write_env .tmp-deploy/backend.env FINANCE_AUTO_SYNC_TIMEZONE "${FINANCE_AUTO_SYNC_TIMEZONE:-Europe/Moscow}"
+          write_env .tmp-deploy/backend.env FINANCE_BOOTSTRAP_LOOKBACK_DAYS "${FINANCE_BOOTSTRAP_LOOKBACK_DAYS:-30}"
+          write_env .tmp-deploy/backend.env FINANCE_SCHEDULER_POLL_SECONDS "${FINANCE_SCHEDULER_POLL_SECONDS:-60}"
+          write_env .tmp-deploy/backend.env FINANCE_SCHEDULER_LEADER_LOCK_SECONDS "${FINANCE_SCHEDULER_LEADER_LOCK_SECONDS:-90}"
+          write_env .tmp-deploy/backend.env FINANCE_AUTO_JOB_LOCK_SECONDS "${FINANCE_AUTO_JOB_LOCK_SECONDS:-1800}"
+          write_env .tmp-deploy/backend.env USAGE_RESET_SCHEDULER_POLL_SECONDS "${USAGE_RESET_SCHEDULER_POLL_SECONDS:-86400}"
+          write_env .tmp-deploy/backend.env CLOUDINARY_CLOUD_NAME "${CLOUDINARY_CLOUD_NAME}"
+          write_env .tmp-deploy/backend.env CLOUDINARY_API_KEY "${CLOUDINARY_API_KEY}"
+          write_env .tmp-deploy/backend.env CLOUDINARY_API_SECRET "${CLOUDINARY_API_SECRET}"
+
+      - name: Upload deployment files to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          APP_DIR="${DEPLOY_PATH:-/opt/seo-wb}"
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            "${VPS_USER}@${VPS_HOST}" \
+            "mkdir -p '${APP_DIR}/deploy/env'"
+
+          scp -i ~/.ssh/deploy_key -P "${VPS_PORT:-22}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            .tmp-deploy/compose.env "${VPS_USER}@${VPS_HOST}:${APP_DIR}/deploy/env/compose.env"
+
+          scp -i ~/.ssh/deploy_key -P "${VPS_PORT:-22}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            .tmp-deploy/backend.env "${VPS_USER}@${VPS_HOST}:${APP_DIR}/deploy/env/backend.env"
+
+          scp -i ~/.ssh/deploy_key -P "${VPS_PORT:-22}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            deploy/vps-deploy.sh "${VPS_USER}@${VPS_HOST}:/tmp/seo-wb-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
+
+      - name: Deploy application
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_BRANCH: ${{ secrets.DEPLOY_BRANCH }}
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          APP_DIR="${DEPLOY_PATH:-/opt/seo-wb}"
+          BRANCH="${DEPLOY_BRANCH:-main}"
+          REMOTE_DEPLOY_SCRIPT="/tmp/seo-wb-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            "${VPS_USER}@${VPS_HOST}" \
+            "trap 'rm -f \"${REMOTE_DEPLOY_SCRIPT}\"' EXIT; APP_DIR='${APP_DIR}' BRANCH='${BRANCH}' DEPLOY_SHA='${DEPLOY_SHA}' bash '${REMOTE_DEPLOY_SCRIPT}'"

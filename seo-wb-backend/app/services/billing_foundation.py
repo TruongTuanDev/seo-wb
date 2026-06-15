@@ -27,6 +27,7 @@ class SubscriptionPlanSeed:
     currency: str
     monthly_credits: int
     monthly_quota: int
+    monthly_card_quota: int
     monthly_cost_limit: float | None
     max_images_per_job: int
     allow_legacy_vton: bool
@@ -42,6 +43,7 @@ SUBSCRIPTION_PLAN_SEEDS = [
         currency="USD",
         monthly_credits=30,
         monthly_quota=30,
+        monthly_card_quota=10,
         monthly_cost_limit=5.0,
         max_images_per_job=4,
         allow_legacy_vton=False,
@@ -55,6 +57,7 @@ SUBSCRIPTION_PLAN_SEEDS = [
         currency="USD",
         monthly_credits=500,
         monthly_quota=500,
+        monthly_card_quota=50,
         monthly_cost_limit=50.0,
         max_images_per_job=8,
         allow_legacy_vton=True,
@@ -68,6 +71,7 @@ SUBSCRIPTION_PLAN_SEEDS = [
         currency="USD",
         monthly_credits=3000,
         monthly_quota=3000,
+        monthly_card_quota=500,
         monthly_cost_limit=300.0,
         max_images_per_job=12,
         allow_legacy_vton=True,
@@ -115,6 +119,7 @@ def ensure_subscription_plan_seeds(db: Session) -> None:
             "currency": plan_seed.currency,
             "monthly_credits": plan_seed.monthly_credits,
             "monthly_quota": plan_seed.monthly_quota,
+            "monthly_card_quota": plan_seed.monthly_card_quota,
             "monthly_cost_limit": plan_seed.monthly_cost_limit,
             "max_images_per_job": plan_seed.max_images_per_job,
             "allow_legacy_vton": plan_seed.allow_legacy_vton,

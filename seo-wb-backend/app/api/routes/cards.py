@@ -2,6 +2,7 @@ import json
 import uuid
 from typing import Annotated, Any
 from pathlib import Path
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -17,6 +18,7 @@ from app.models.admin import GeneratedImageJob
 from app.models.card import CardDraft, CardJob
 from app.models.user import User
 from app.schemas.card import (
+    AcceptLowConfidenceAttributesRequest,
     CardGenerateResponse,
     CardJobResponse,
     DraftListResponse,
@@ -34,16 +36,22 @@ from app.schemas.card import (
     ImageGenerationJobResponse,
 )
 from app.services.card_flow import CardFlowService
+from app.services.card_generator import CardGenerator
+from app.services.card_payload_enricher import CardPayloadEnricher
+from app.services.product_copy_policy import build_copy_policy_context, build_seo_title, cleanup_description, cleanup_title, render_description, resolve_product_family
 from app.services.rabbitmq_publisher import publish_sync_job
 from app.services.admin_runtime import get_effective_ai_runtime_settings, list_public_model_templates
 from app.services.billing_foundation import credit_cost_for_job, pending_credit_reservations, queue_name_for_plan
 from app.services.product_image_generator import ProductImageGenerator
 from app.services.redis_client import require_redis
+from app.services.seo_content_validator import SeoContentValidator
+from app.services.seo_keyword_planner import SeoKeywordPlanner
 from app.services.usage_plans import get_usage_plan
 
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 JOB_STORAGE_DIR = Path("storage/card_jobs")
+DRAFT_REFERENCE_STORAGE_DIR = Path("storage/card_drafts")
 CHUNK_SIZE = 1024 * 1024
 
 def resolve_model_image_path(model_id: str) -> Path | None:
@@ -77,6 +85,73 @@ def resolve_model_image_path(model_id: str) -> Path | None:
     return None
 
 
+def select_auto_model_template(
+    db: Session,
+    garment_json: dict[str, Any],
+    analysis: dict[str, Any],
+    selected_model_gender: str | None
+) -> Any | None:
+    category = garment_json.get("category") or analysis.get("category")
+    mapped_garment_type = None
+    if category:
+        cat = category.lower().strip()
+        if any(token in cat for token in ["брюки", "штаны", "леггинсы", "джоггеры", "pants", "джинсы", "jeans", "шорты", "shorts"]):
+            mapped_garment_type = "pants"
+        elif any(token in cat for token in ["юбк", "skirt", "плать", "сарафан", "dress"]):
+            mapped_garment_type = "dress"
+        elif any(token in cat for token in ["рубаш", "блуз", "shirt", "футболк", "майк", "топ", "t-shirt", "худи", "свитшот", "толстовк", "джемпер", "свитер", "пуловер", "кардиган", "hoodie", "куртк", "пальто", "пиджак", "жилет", "ветровк", "бомбер", "jacket"]):
+            mapped_garment_type = "shirt"
+        elif any(token in cat for token in ["костюм", "комбинезон", "комплект", "set", "suit"]):
+            mapped_garment_type = "suit"
+        elif any(token in cat for token in ["обувь", "shoes", "ботин", "сапог", "кроссов"]):
+            mapped_garment_type = "shoes"
+
+    normalized_gender = str(selected_model_gender or garment_json.get("gender") or analysis.get("gender") or "female").lower()
+    model_gender = "female"
+    if any(token in normalized_gender for token in ("male", "man", "men", "boy", "муж")):
+        model_gender = "male"
+
+    from sqlalchemy import select, func, or_
+    from app.models.admin import ModelTemplate
+
+    query = select(ModelTemplate).where(
+        ModelTemplate.status == "active",
+        ModelTemplate.quality_status == "approved",
+        ModelTemplate.deleted_at.is_(None),
+        ModelTemplate.gender == model_gender
+    )
+    if mapped_garment_type:
+        query = query.where(
+            or_(
+                ModelTemplate.garment_type == mapped_garment_type,
+                ModelTemplate.garment_type == "full_body",
+                ModelTemplate.garment_type.is_(None)
+            )
+        )
+    query = query.order_by(func.random())
+    resolved_model = db.scalars(query).first()
+
+    if not resolved_model:
+        query_fb = select(ModelTemplate).where(
+            ModelTemplate.status == "active",
+            ModelTemplate.quality_status == "approved",
+            ModelTemplate.deleted_at.is_(None),
+            ModelTemplate.gender == model_gender
+        ).order_by(func.random())
+        resolved_model = db.scalars(query_fb).first()
+
+    if not resolved_model:
+        query_any = select(ModelTemplate).where(
+            ModelTemplate.status == "active",
+            ModelTemplate.quality_status == "approved",
+            ModelTemplate.deleted_at.is_(None)
+        ).order_by(func.random())
+        resolved_model = db.scalars(query_any).first()
+
+    return resolved_model
+
+
+
 def _runtime_config(db: Session, settings: Settings) -> dict[str, Any]:
     runtime = get_effective_ai_runtime_settings(db, settings)
     return {
@@ -89,6 +164,20 @@ def _runtime_config(db: Session, settings: Settings) -> dict[str, Any]:
         "validation_threshold": runtime.validation_threshold,
         "validation_failure_behavior": runtime.validation_failure_behavior,
         "allow_legacy_vton": runtime.allow_legacy_vton,
+        "seo_engine_enabled": runtime.seo_engine_enabled,
+        "seo_min_score": runtime.seo_min_score,
+        "description_min_chars": runtime.description_min_chars,
+        "description_max_chars": runtime.description_max_chars,
+        "seo_repair_max_attempts": runtime.seo_repair_max_attempts,
+        "require_primary_keyword_in_title": runtime.require_primary_keyword_in_title,
+        "warn_low_confidence_attributes": runtime.warn_low_confidence_attributes,
+        "enable_russian_grammar_validation": runtime.enable_russian_grammar_validation,
+        "enable_keyword_stuffing_detection": runtime.enable_keyword_stuffing_detection,
+        "enable_subject_title_templates": runtime.enable_subject_title_templates,
+        "include_gender_in_title": runtime.include_gender_in_title,
+        "minimum_grammar_score": runtime.minimum_grammar_score,
+        "minimum_marketplace_score": runtime.minimum_marketplace_score,
+        "minimum_critical_attribute_score": runtime.minimum_critical_attribute_score,
     }
 
 
@@ -116,6 +205,18 @@ def _enforce_user_quota(user: User, quantity: int) -> None:
         raise AppError(
             "quota_exceeded",
             f"Monthly generation quota exceeded. Remaining quota: {remaining}.",
+            403,
+        )
+
+
+def _enforce_user_card_quota(user: User, quantity: int) -> None:
+    monthly_card_quota = max(0, int(user.monthly_card_quota or 0))
+    used_card_quota = max(0, int(user.used_card_quota or 0))
+    if used_card_quota + quantity > monthly_card_quota:
+        remaining = max(0, monthly_card_quota - used_card_quota)
+        raise AppError(
+            "card_quota_exceeded",
+            f"Monthly card creation quota exceeded. Remaining card quota: {remaining}.",
             403,
         )
 
@@ -187,6 +288,100 @@ def _draft_garment_json(draft: CardDraft) -> dict[str, Any]:
     analysis = _draft_analysis(draft)
     garment_json = analysis.get("garment_json")
     return garment_json if isinstance(garment_json, dict) else {}
+
+
+def _draft_reference_manifest(draft: CardDraft) -> dict[str, Any]:
+    analysis = _draft_analysis(draft)
+    manifest = analysis.get("reference_images")
+    return manifest if isinstance(manifest, dict) else {}
+
+
+def _draft_reference_dir(draft_id: int) -> Path:
+    return DRAFT_REFERENCE_STORAGE_DIR / str(draft_id) / "references"
+
+
+def _guess_reference_extension(file_name: str | None) -> str:
+    suffix = Path(file_name or "").suffix.lower()
+    if suffix in {".jpg", ".jpeg", ".png", ".webp"}:
+        return suffix
+    return ".jpg"
+
+
+def _store_draft_reference_images(draft: CardDraft, image_bytes: list[bytes], file_names: list[str | None]) -> dict[str, Any]:
+    if not image_bytes:
+        return _draft_reference_manifest(draft)
+    reference_dir = _draft_reference_dir(draft.id)
+    reference_dir.mkdir(parents=True, exist_ok=True)
+    manifest: dict[str, Any] = {}
+
+    front_ext = _guess_reference_extension(file_names[0] if file_names else None)
+    front_name = f"front{front_ext}"
+    (reference_dir / front_name).write_bytes(image_bytes[0])
+    manifest["front"] = front_name
+
+    if len(image_bytes) > 1:
+        back_ext = _guess_reference_extension(file_names[1] if len(file_names) > 1 else None)
+        back_name = f"back{back_ext}"
+        (reference_dir / back_name).write_bytes(image_bytes[1])
+        manifest["back"] = back_name
+
+    return manifest
+
+
+def _load_draft_reference_images(draft: CardDraft) -> tuple[bytes | None, bytes | None]:
+    manifest = _draft_reference_manifest(draft)
+    reference_dir = _draft_reference_dir(draft.id)
+
+    def _read_ref(name: str) -> bytes | None:
+        file_name = manifest.get(name)
+        if not file_name:
+            return None
+        path = (reference_dir / str(file_name)).resolve()
+        try:
+            path.relative_to(reference_dir.resolve())
+        except ValueError as exc:
+            raise AppError("invalid_reference_image", "Stored reference image path is invalid.", 500) from exc
+        if not path.exists():
+            return None
+        return path.read_bytes()
+
+    return _read_ref("front"), _read_ref("back")
+
+
+async def _resolve_product_reference_images(
+    draft: CardDraft,
+    settings: Settings,
+    *,
+    front_upload: UploadFile | None,
+    back_upload: UploadFile | None,
+    allow_missing_back: bool = True,
+) -> tuple[bytes, bytes | None]:
+    if front_upload is not None:
+        _validate_image_upload(front_upload)
+        front_bytes = await _read_upload_limited(front_upload, settings.max_upload_image_bytes, "image_too_large")
+    else:
+        front_bytes, _ = _load_draft_reference_images(draft)
+        if front_bytes is None:
+            raise AppError(
+                "missing_front_reference",
+                "Front product image is required. Upload it once in the first step or provide a new front image.",
+                400,
+            )
+
+    if back_upload is not None:
+        _validate_image_upload(back_upload)
+        back_bytes = await _read_upload_limited(back_upload, settings.max_upload_image_bytes, "image_too_large")
+    else:
+        _, back_bytes = _load_draft_reference_images(draft)
+
+    if not allow_missing_back and back_bytes is None:
+        raise AppError(
+            "missing_back_reference",
+            "Back product image is required for this action. Upload it in the first step or provide a new back image.",
+            400,
+        )
+
+    return front_bytes, back_bytes
 
 
 def _extract_variant_context(draft: CardDraft, variant_index: int) -> tuple[str | None, str | None]:
@@ -267,6 +462,13 @@ async def generate_card(
         for image in images
     ]
     draft = await CardFlowService(settings, db, user, store).generate_draft(image_bytes, product_input)
+    reference_manifest = _store_draft_reference_images(draft, image_bytes, [image.filename for image in images])
+    if reference_manifest:
+        analysis_copy = dict(draft.analysis or {})
+        analysis_copy["reference_images"] = reference_manifest
+        draft.analysis = analysis_copy
+        db.commit()
+        db.refresh(draft)
     card_payload = [CardUploadGroup.model_validate(group) for group in draft.card_payload]
     analysis = _draft_analysis(draft)
     return CardGenerateResponse(
@@ -274,6 +476,10 @@ async def generate_card(
         analysis=ImageAnalysis.model_validate(analysis),
         card_payload=card_payload,
         warnings=analysis.get("warnings", []),
+        seo_keyword_plan=analysis.get("seo_keyword_plan"),
+        seo_score=analysis.get("seo_score"),
+        seo_issues=analysis.get("seo_issues", []),
+        attribute_confidence=analysis.get("attribute_confidence"),
     )
 
 
@@ -382,8 +588,8 @@ async def enqueue_image_generation_job(
     variant_index: int = Form(...),
     quantity: int = Form(...),
     metadata_json: str = Form(default="{}"),
-    front_image: UploadFile = File(...),
-    back_image: UploadFile = File(...),
+    front_image: UploadFile | None = File(default=None),
+    back_image: UploadFile | None = File(default=None),
     model_image: UploadFile | None = File(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -408,13 +614,17 @@ async def enqueue_image_generation_job(
     except Exception as exc:
         raise AppError("invalid_image_job_metadata", "metadata_json must be a valid JSON object.", 400) from exc
 
-    for upload in [front_image, back_image, model_image]:
+    for upload in [model_image]:
         if upload is not None:
             _validate_image_upload(upload)
     metadata["runtime_config"] = runtime_config
     metadata.setdefault("model", runtime_config["default_image_model"])
-    front_bytes = await _read_upload_limited(front_image, settings.max_upload_image_bytes, "image_too_large")
-    back_bytes = await _read_upload_limited(back_image, settings.max_upload_image_bytes, "image_too_large")
+    front_bytes, back_bytes = await _resolve_product_reference_images(
+        draft,
+        settings,
+        front_upload=front_image,
+        back_upload=back_image,
+    )
     model_bytes = await _read_upload_limited(model_image, settings.max_upload_image_bytes, "image_too_large") if model_image else None
     redis = require_redis(settings)
     job = await ProductImageGenerator(settings, redis).create_job(
@@ -484,7 +694,7 @@ async def enqueue_try_on_job(
     posePack: str = Form(default=""),
     backgroundStyle: str = Form(default="none"),
     quantity: int = Form(...),
-    productFrontImage: UploadFile = File(...),
+    productFrontImage: UploadFile | None = File(default=None),
     productBackImage: UploadFile | None = File(default=None),
     productCategory: str = Form(default=""),
     garmentType: str = Form(default=""),
@@ -507,13 +717,12 @@ async def enqueue_try_on_job(
     _enforce_generation_budget(db, locked_user, quantity, estimated_cost)
     _enforce_credit_balance(db, locked_user, credit_cost)
         
-    for upload in [productFrontImage]:
-        _validate_image_upload(upload)
-    if productBackImage:
-        _validate_image_upload(productBackImage)
-
-    front_bytes = await _read_upload_limited(productFrontImage, settings.max_upload_image_bytes, "image_too_large")
-    back_bytes = await _read_upload_limited(productBackImage, settings.max_upload_image_bytes, "image_too_large") if productBackImage else None
+    front_bytes, back_bytes = await _resolve_product_reference_images(
+        draft,
+        settings,
+        front_upload=productFrontImage,
+        back_upload=productBackImage,
+    )
     
     # Resolve product category and garment type
     resolved_category = productCategory
@@ -581,7 +790,7 @@ async def get_try_on_job(
 @router.post("/drafts/{draft_id}/garment/analyze")
 async def analyze_draft_garment(
     draft_id: int,
-    front_image: UploadFile = File(...),
+    front_image: UploadFile | None = File(default=None),
     back_image: UploadFile | None = File(default=None),
     title: str | None = Form(default=None),
     description: str | None = Form(default=None),
@@ -592,12 +801,12 @@ async def analyze_draft_garment(
     user: User = Depends(get_current_user),
 ):
     draft = _get_owned_draft(db, user, draft_id)
-    _validate_image_upload(front_image)
-    if back_image:
-        _validate_image_upload(back_image)
-    
-    front_bytes = await _read_upload_limited(front_image, settings.max_upload_image_bytes, "image_too_large")
-    back_bytes = await _read_upload_limited(back_image, settings.max_upload_image_bytes, "image_too_large") if back_image else None
+    front_bytes, back_bytes = await _resolve_product_reference_images(
+        draft,
+        settings,
+        front_upload=front_image,
+        back_upload=back_image,
+    )
 
     from app.services.garment_analyzer import GarmentAnalyzer
     analyzer = GarmentAnalyzer(settings)
@@ -616,6 +825,14 @@ async def analyze_draft_garment(
     analysis_copy["garment_area"] = garment_json.get("garment_area")
     draft.analysis = analysis_copy
     draft.garment_json = garment_json
+    if front_image is not None or back_image is not None:
+        updated_bytes = [front_bytes]
+        updated_names = [front_image.filename if front_image is not None else "front.jpg"]
+        if back_bytes is not None:
+            updated_bytes.append(back_bytes)
+            updated_names.append(back_image.filename if back_image is not None else "back.jpg")
+        analysis_copy["reference_images"] = _store_draft_reference_images(draft, updated_bytes, updated_names)
+        draft.analysis = analysis_copy
     db.commit()
 
     return garment_json
@@ -640,14 +857,15 @@ async def enqueue_gpt_image_job(
     store_id: int = Form(...),
     variant_id: str = Form(...),
     variant_index: int = Form(...),
-    selectedModelId: str = Form(...),
-    selectedModelImageUrl: str = Form(...),
-    selectedModelGender: str = Form(...),
-    selectedModelBodyType: str = Form(...),
+    selectedModelId: str | None = Form(default=None),
+    selectedModelImageUrl: str | None = Form(default=None),
+    selectedModelGender: str | None = Form(default=None),
+    selectedModelBodyType: str | None = Form(default=None),
     style: str = Form(...),
     quantity: int = Form(...),
-    productFrontImage: UploadFile = File(...),
+    productFrontImage: UploadFile | None = File(default=None),
     productBackImage: UploadFile | None = File(default=None),
+    autoGenerateModel: bool = Form(default=False),
     model: str | None = Form(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -667,19 +885,24 @@ async def enqueue_gpt_image_job(
     _enforce_generation_budget(db, locked_user, quantity, estimated_cost)
     _enforce_credit_balance(db, locked_user, credit_cost)
 
-    _validate_image_upload(productFrontImage)
-    if productBackImage:
-        _validate_image_upload(productBackImage)
+    auto_model_generation = bool(autoGenerateModel or selectedModelId == "auto_russian_model")
+    if not auto_model_generation and (not selectedModelId or selectedModelId == "none"):
+        raise AppError("missing_model_reference", "Please select a real model reference before generating catalog images.", 400)
 
-    front_bytes = await _read_upload_limited(productFrontImage, settings.max_upload_image_bytes, "image_too_large")
-    back_bytes = await _read_upload_limited(productBackImage, settings.max_upload_image_bytes, "image_too_large") if productBackImage else None
+    front_bytes, back_bytes = await _resolve_product_reference_images(
+        draft,
+        settings,
+        front_upload=productFrontImage,
+        back_upload=productBackImage,
+    )
 
     # Resolve model reference image
     model_bytes = None
-    model_p = resolve_model_image_path(selectedModelId)
-    if model_p and model_p.exists():
-        with open(model_p, "rb") as f:
-            model_bytes = f.read()
+    if not auto_model_generation and selectedModelId and selectedModelId not in {"none", "auto_russian_model"}:
+        model_p = resolve_model_image_path(selectedModelId)
+        if model_p and model_p.exists():
+            with open(model_p, "rb") as f:
+                model_bytes = f.read()
 
     analysis = _draft_analysis(draft)
     garment_json = _draft_garment_json(draft)
@@ -702,16 +925,31 @@ async def enqueue_gpt_image_job(
         draft.garment_json = garment_json
         db.commit()
 
+    if auto_model_generation:
+        resolved_model = select_auto_model_template(db, garment_json, analysis, selectedModelGender)
+        if resolved_model:
+            selectedModelId = resolved_model.id
+            selectedModelImageUrl = resolved_model.reference_image_url or (resolved_model.poses or {}).get("front") or resolved_model.thumbnail_url or ""
+            selectedModelGender = resolved_model.gender
+            selectedModelBodyType = resolved_model.body_type
+            auto_model_generation = False
+
+            model_p = resolve_model_image_path(selectedModelId)
+            if model_p and model_p.exists():
+                with open(model_p, "rb") as f:
+                    model_bytes = f.read()
+
     metadata = {
         "title": draft.vendor_code or "garment",
         "category": "gpt-image",
-        "model_id": selectedModelId,
-        "selected_model_image_url": selectedModelImageUrl,
-        "selected_model_gender": selectedModelGender,
-        "selected_model_body_type": selectedModelBodyType,
+        "model_id": "auto_russian_model" if auto_model_generation else (selectedModelId or "none"),
+        "selected_model_image_url": "" if auto_model_generation else (selectedModelImageUrl or ""),
+        "selected_model_gender": selectedModelGender or analysis.get("gender") or "female",
+        "selected_model_body_type": selectedModelBodyType or "",
         "style": style,
         "garment_json": garment_json,
         "runtime_config": runtime_config,
+        "auto_model_generation": auto_model_generation,
         "output_type": "catalog_bundle",
     }
     metadata["model"] = model or runtime_config["default_image_model"]
@@ -729,12 +967,13 @@ async def enqueue_gpt_image_job(
         back_image=back_bytes,
         model_image=model_bytes,
         job_type="gpt_image",
-        model_id=selectedModelId,
+        model_id="auto_russian_model" if auto_model_generation else (selectedModelId or "none"),
         queue_name=queue_name_for_plan(user.plan_type),
         credit_cost=credit_cost,
         db=db,
     )
     return ImageGenerationJobResponse.model_validate(job)
+
 
 
 @router.get("/drafts/{draft_id}/gpt-image/jobs/{job_id}", response_model=ImageGenerationJobResponse)
@@ -763,7 +1002,7 @@ async def enqueue_gpt_image_openai_job(
     selectedModelBodyType: str | None = Form(default=None),
     style: str = Form(...),
     quantity: int = Form(...),
-    productFrontImage: UploadFile = File(...),
+    productFrontImage: UploadFile | None = File(default=None),
     productBackImage: UploadFile | None = File(default=None),
     modelImage: UploadFile | None = File(default=None),
     autoGenerateModel: bool = Form(default=False),
@@ -790,14 +1029,15 @@ async def enqueue_gpt_image_openai_job(
     if not auto_model_generation and not modelImage and (not selectedModelId or selectedModelId == "none"):
         raise AppError("missing_model_reference", "Please select a real model reference before generating catalog images.", 400)
 
-    _validate_image_upload(productFrontImage)
-    if productBackImage:
-        _validate_image_upload(productBackImage)
     if modelImage:
         _validate_image_upload(modelImage)
 
-    front_bytes = await _read_upload_limited(productFrontImage, settings.max_upload_image_bytes, "image_too_large")
-    back_bytes = await _read_upload_limited(productBackImage, settings.max_upload_image_bytes, "image_too_large") if productBackImage else None
+    front_bytes, back_bytes = await _resolve_product_reference_images(
+        draft,
+        settings,
+        front_upload=productFrontImage,
+        back_upload=productBackImage,
+    )
 
     # Resolve model reference image
     model_bytes = None
@@ -829,6 +1069,20 @@ async def enqueue_gpt_image_openai_job(
         draft.analysis = analysis_copy
         draft.garment_json = garment_json
         db.commit()
+
+    if auto_model_generation:
+        resolved_model = select_auto_model_template(db, garment_json, analysis, selectedModelGender)
+        if resolved_model:
+            selectedModelId = resolved_model.id
+            selectedModelImageUrl = resolved_model.reference_image_url or (resolved_model.poses or {}).get("front") or resolved_model.thumbnail_url or ""
+            selectedModelGender = resolved_model.gender
+            selectedModelBodyType = resolved_model.body_type
+            auto_model_generation = False
+
+            model_p = resolve_model_image_path(selectedModelId)
+            if model_p and model_p.exists():
+                with open(model_p, "rb") as f:
+                    model_bytes = f.read()
 
     metadata = {
         "title": draft.vendor_code or "garment",
@@ -1075,11 +1329,19 @@ async def push_draft(
     draft = _get_owned_draft(db, user, draft_id)
     store = get_owned_store(db, user, draft.store_id)
     groups = payload.card_payload or [CardUploadGroup.model_validate(group) for group in draft.card_payload]
+    
+    quantity = sum(len(group.variants) for group in groups)
+    _enforce_user_card_quota(user, quantity)
+    
     wb_response = await CardFlowService(settings, db, user, store).push_new_cards(groups, payload.dry_run)
     request_payload = [group.model_dump(mode="json", exclude_none=True) for group in groups]
     draft.status = "dry_run" if payload.dry_run else "pushed"
     draft.card_payload = request_payload
     draft.wb_response = wb_response
+    
+    if not payload.dry_run:
+        user.used_card_quota = user.used_card_quota + quantity
+        
     db.commit()
     return PushResponse(dry_run=payload.dry_run, request_payload=request_payload, wb_response=wb_response)
 
@@ -1093,6 +1355,10 @@ async def push_merge(
     user: Annotated[User, Depends(get_current_user)],
 ) -> PushResponse:
     store = get_owned_store(db, user, store_id)
+    
+    quantity = len(payload.cardsToAdd)
+    _enforce_user_card_quota(user, quantity)
+    
     variants = [variant.model_dump(mode="json", exclude_none=True) for variant in payload.cardsToAdd]
     wb_response = await CardFlowService(settings, db, user, store).push_merge_cards(
         payload.imtID,
@@ -1101,6 +1367,11 @@ async def push_merge(
         payload.subjectID,
     )
     request_payload = {"imtID": payload.imtID, "cardsToAdd": variants}
+    
+    if not payload.dry_run:
+        user.used_card_quota = user.used_card_quota + quantity
+        db.commit()
+        
     return PushResponse(dry_run=payload.dry_run, request_payload=request_payload, wb_response=wb_response)
 
 
@@ -1308,6 +1579,311 @@ def _draft_response(draft: CardDraft) -> DraftResponse:
         analysis=draft.analysis,
         card_payload=draft.card_payload,
         wb_response=draft.wb_response,
+        seo_keyword_plan=draft.analysis.get("seo_keyword_plan") if isinstance(draft.analysis, dict) else None,
+        seo_score=draft.analysis.get("seo_score") if isinstance(draft.analysis, dict) else None,
+        seo_issues=draft.analysis.get("seo_issues", []) if isinstance(draft.analysis, dict) else [],
+        attribute_confidence=draft.analysis.get("attribute_confidence") if isinstance(draft.analysis, dict) else None,
         created_at=draft.created_at,
         updated_at=draft.updated_at,
+    )
+
+
+def _draft_payload_copy(draft: CardDraft) -> list[dict[str, Any]]:
+    payload = draft.card_payload if isinstance(draft.card_payload, list) else []
+    return json.loads(json.dumps(payload))
+
+
+def _draft_product_input(draft: CardDraft) -> ProductInput:
+    analysis = _draft_analysis(draft)
+    raw = analysis.get("product_input") if isinstance(analysis, dict) else None
+    if isinstance(raw, dict):
+        try:
+            return ProductInput.model_validate(raw)
+        except Exception:
+            return ProductInput()
+    return ProductInput()
+
+
+def _draft_image_analysis_model(draft: CardDraft) -> ImageAnalysis:
+    analysis = _draft_analysis(draft)
+    return ImageAnalysis.model_validate(analysis)
+
+
+def _draft_subject_context(draft: CardDraft, analysis_model: ImageAnalysis, product_input: ProductInput) -> dict[str, Any]:
+    payload = draft.card_payload if isinstance(draft.card_payload, list) and draft.card_payload else []
+    subject_id = draft.subject_id or (payload[0].get("subjectID") if payload and isinstance(payload[0], dict) else None) or 0
+    subject_name = product_input.category or analysis_model.category or "Товар"
+    if payload and isinstance(payload[0], dict):
+        first_title = (((payload[0].get("variants") or [None])[0]) or {}).get("title") if payload[0].get("variants") else None
+        if first_title and len(str(first_title).split()) <= 8:
+            subject_name = str(first_title).split()[0]
+    return {"subjectID": int(subject_id), "subjectName": str(subject_name)}
+
+
+async def _draft_charcs(
+    db: Session,
+    settings: Settings,
+    user: User,
+    draft: CardDraft,
+    subject_id: int,
+) -> list[dict[str, Any]]:
+    store = get_owned_store(db, user, draft.store_id)
+    flow = CardFlowService(settings, db, user, store)
+    return await flow._wb.get_subject_charcs(subject_id, locale="ru")
+
+
+async def _recompute_draft_seo(
+    draft: CardDraft,
+    *,
+    db: Session,
+    settings: Settings,
+    user: User,
+    rewrite_copy: bool,
+    improve_only: bool,
+) -> DraftResponse:
+    runtime = get_effective_ai_runtime_settings(db, settings)
+    if not runtime.seo_engine_enabled:
+        raise AppError("seo_engine_disabled", "SEO engine is disabled by admin settings.", 403)
+
+    product_input = _draft_product_input(draft)
+    analysis_model = _draft_image_analysis_model(draft)
+    subject = _draft_subject_context(draft, analysis_model, product_input)
+    charcs = await _draft_charcs(db, settings, user, draft, int(subject["subjectID"]))
+    analysis = _draft_analysis(draft)
+    payload = _draft_payload_copy(draft)
+    attribute_confidence = analysis.get("attribute_confidence") if isinstance(analysis.get("attribute_confidence"), dict) else None
+    if not attribute_confidence:
+        attribute_confidence = CardPayloadEnricher(charcs).build_attribute_confidence(
+            subject_id=int(subject["subjectID"]),
+            user_input=product_input,
+            analysis=analysis_model,
+        )
+    seo_keyword_plan = analysis.get("seo_keyword_plan") if isinstance(analysis.get("seo_keyword_plan"), dict) else None
+    if not seo_keyword_plan:
+        seo_keyword_plan = SeoKeywordPlanner.build_plan(
+            category=product_input.category or analysis_model.category,
+            subject_name=subject.get("subjectName"),
+            brand=product_input.brand,
+            gender=product_input.gender or analysis_model.gender,
+            analysis=analysis_model,
+            user_input=product_input,
+            confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+            wb_characteristics=charcs,
+            product_family_policy=build_copy_policy_context(subject, analysis_model, product_input),
+        )
+
+    current_score = analysis.get("seo_score") if isinstance(analysis.get("seo_score"), dict) else {}
+    should_rewrite = rewrite_copy or not improve_only or int(current_score.get("seo_score") or 0) < runtime.seo_min_score
+
+    if should_rewrite:
+        for group in payload:
+            for variant in group.get("variants") or []:
+                title_payload = build_seo_title(
+                    subject.get("subjectName"),
+                    analysis_model.gender or product_input.gender,
+                    CardGenerator._title_attributes(product_input, analysis_model, subject, seo_keyword_plan, attribute_confidence),
+                    seo_keyword_plan,
+                    brand=(product_input.brand or "").strip() or None,
+                    include_gender_in_title=runtime.include_gender_in_title,
+                )
+                variant["title"] = cleanup_title(
+                    str(title_payload.get("title") or variant.get("title") or ""),
+                    str(subject.get("subjectName") or "Товар"),
+                    analysis_model,
+                    product_input,
+                )
+                policy = resolve_product_family(subject, analysis_model, product_input)
+                regenerated = render_description(policy, title=variant["title"], analysis=analysis_model, user_input=product_input)
+                variant["description"] = cleanup_description(
+                    regenerated if rewrite_copy or not str(variant.get("description") or "").strip() else str(variant.get("description") or ""),
+                    title=variant["title"],
+                    subject=subject,
+                    analysis=analysis_model,
+                    user_input=product_input,
+                )
+
+    issues: list[str] = []
+    suggestions: list[str] = []
+    scorecards: list[dict[str, Any]] = []
+    for group in payload:
+        for variant in group.get("variants") or []:
+            validator_result = SeoContentValidator.validate(
+                title=str(variant.get("title") or ""),
+                description=str(variant.get("description") or ""),
+                seo_keyword_plan=seo_keyword_plan,
+                confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+                inferred_attributes=attribute_confidence.get("inferred_attributes"),
+                min_chars=runtime.description_min_chars,
+                max_chars=runtime.description_max_chars,
+                auto_fix=True,
+            )
+            variant["description"] = validator_result.get("fixed_description") or variant.get("description")
+            issues.extend(validator_result.get("issues", []))
+            suggestions.extend(validator_result.get("suggestions", []))
+            scorecard = SeoContentValidator.build_scorecard(
+                    title=str(variant.get("title") or ""),
+                    description=str(variant.get("description") or ""),
+                    seo_keyword_plan=seo_keyword_plan,
+                    validator_result=validator_result,
+                    confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+                    inferred_attributes=attribute_confidence.get("inferred_attributes"),
+                    subject_name=subject.get("subjectName"),
+                    wb_characteristics=charcs,
+                    low_confidence_attributes=attribute_confidence.get("low_confidence_attributes"),
+                )
+            scorecards.append(scorecard)
+            issues.extend(scorecard.get("issues", []))
+            suggestions.extend(scorecard.get("suggestions", []))
+    aggregate = {
+        "seo_score": int(round(sum(item.get("seo_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "title_score": int(round(sum(item.get("title_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "description_score": int(round(sum(item.get("description_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "attributes_score": int(round(sum(item.get("attributes_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "keyword_coverage_score": int(round(sum(item.get("keyword_coverage_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "grammar_score": int(round(sum(item.get("grammar_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "marketplace_score": int(round(sum(item.get("marketplace_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "subject_rule_score": int(round(sum(item.get("subject_rule_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "critical_attribute_score": int(round(sum(item.get("critical_attribute_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "semantic_consistency_score": int(round(sum(item.get("semantic_consistency_score", 0) for item in scorecards) / max(1, len(scorecards)))),
+        "issues": list(dict.fromkeys(issues))[:10],
+        "suggestions": list(dict.fromkeys(suggestions))[:10],
+        "blocking_issues": list(dict.fromkeys(
+            issue
+            for item in scorecards
+            for issue in item.get("blocking_issues", [])
+        )),
+        "status": "poor",
+        "variants": scorecards,
+    }
+    score = aggregate["seo_score"]
+    aggregate["status"] = (
+        "needs_review"
+        if aggregate["blocking_issues"]
+        else "excellent" if score >= 85 else "good" if score >= 70 else "needs_review" if score >= 50 else "poor"
+    )
+
+    next_analysis = dict(analysis)
+    next_analysis["product_input"] = product_input.model_dump(mode="json", exclude_none=True)
+    next_analysis["attribute_confidence"] = attribute_confidence
+    next_analysis["seo_keyword_plan"] = seo_keyword_plan
+    next_analysis["seo_score"] = aggregate
+    next_analysis["seo_issues"] = aggregate["issues"]
+    draft.analysis = next_analysis
+    draft.card_payload = _preserve_existing_media(draft.card_payload, payload)
+    db.commit()
+    db.refresh(draft)
+    return _draft_response(draft)
+
+
+@router.post("/drafts/{draft_id}/seo/improve", response_model=DraftResponse)
+async def improve_draft_seo(
+    draft_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> DraftResponse:
+    draft = _get_owned_draft(db, user, draft_id)
+    return await _recompute_draft_seo(
+        draft,
+        db=db,
+        settings=settings,
+        user=user,
+        rewrite_copy=False,
+        improve_only=True,
+    )
+
+
+@router.post("/drafts/{draft_id}/seo/regenerate-copy", response_model=DraftResponse)
+async def regenerate_draft_seo_copy(
+    draft_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> DraftResponse:
+    draft = _get_owned_draft(db, user, draft_id)
+    return await _recompute_draft_seo(
+        draft,
+        db=db,
+        settings=settings,
+        user=user,
+        rewrite_copy=True,
+        improve_only=False,
+    )
+
+
+@router.post("/drafts/{draft_id}/seo/accept-low-confidence-attributes", response_model=DraftResponse)
+async def accept_low_confidence_attributes(
+    draft_id: int,
+    payload: AcceptLowConfidenceAttributesRequest,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> DraftResponse:
+    draft = _get_owned_draft(db, user, draft_id)
+    runtime = get_effective_ai_runtime_settings(db, settings)
+    if not runtime.seo_engine_enabled:
+        raise AppError("seo_engine_disabled", "SEO engine is disabled by admin settings.", 403)
+
+    analysis = dict(_draft_analysis(draft))
+    attribute_confidence = analysis.get("attribute_confidence")
+    if not isinstance(attribute_confidence, dict):
+        raise AppError("attribute_confidence_missing", "Draft does not have attribute confidence data yet.", 409)
+    confirmed_attributes = dict(attribute_confidence.get("confirmed_attributes") or {})
+    inferred_attributes = dict(attribute_confidence.get("inferred_attributes") or {})
+    low_confidence_attributes = list(attribute_confidence.get("low_confidence_attributes") or [])
+    selected_keys = [str(key).strip() for key in payload.attribute_keys if str(key).strip()]
+
+    moved_keys: list[str] = []
+    for key in selected_keys:
+        if key in low_confidence_attributes and key in inferred_attributes:
+            confirmed_attributes[key] = inferred_attributes[key]
+            inferred_attributes.pop(key, None)
+            moved_keys.append(key)
+    attribute_confidence["confirmed_attributes"] = confirmed_attributes
+    attribute_confidence["inferred_attributes"] = inferred_attributes
+    attribute_confidence["low_confidence_attributes"] = [key for key in low_confidence_attributes if key not in moved_keys]
+
+    product_input = _draft_product_input(draft)
+    analysis_model = _draft_image_analysis_model(draft)
+    subject = _draft_subject_context(draft, analysis_model, product_input)
+    charcs = await _draft_charcs(db, settings, user, draft, int(subject["subjectID"]))
+    enricher = CardPayloadEnricher(charcs)
+    next_payload = _draft_payload_copy(draft)
+    alias_map = {
+        "composition": "composition",
+        "material": "composition",
+        "color": "color",
+        "gender": "gender",
+        "season": "season",
+        "fit": "fit",
+        "pattern": "pattern",
+        "purpose": "purpose",
+        "lining": "lining",
+        "texture": "texture",
+    }
+    for group in next_payload:
+        for variant in group.get("variants") or []:
+            for key in moved_keys:
+                alias = alias_map.get(key, key)
+                value = confirmed_attributes.get(alias) or confirmed_attributes.get(key)
+                if value:
+                    enricher._upsert_by_alias(variant, alias, value, overwrite=True)
+            enricher._conform_characteristics(variant)
+
+    accepted_history = list(analysis.get("accepted_low_confidence_attributes") or [])
+    accepted_history.extend([key for key in moved_keys if key not in accepted_history])
+    analysis["accepted_low_confidence_attributes"] = accepted_history
+    analysis["accepted_at"] = datetime.now(timezone.utc).isoformat()
+    analysis["attribute_confidence"] = attribute_confidence
+    draft.analysis = analysis
+    draft.card_payload = _preserve_existing_media(draft.card_payload, next_payload)
+    db.commit()
+    db.refresh(draft)
+    return await _recompute_draft_seo(
+        draft,
+        db=db,
+        settings=settings,
+        user=user,
+        rewrite_copy=False,
+        improve_only=False,
     )

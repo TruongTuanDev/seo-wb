@@ -18,6 +18,7 @@ class AdminUserCreateRequest(BaseModel):
     status: str = "active"
     plan_type: str = "free"
     monthly_quota: int | None = None
+    monthly_card_quota: int | None = None
     monthly_cost_limit: float | None = None
 
 
@@ -30,6 +31,8 @@ class AdminUserUpdateRequest(BaseModel):
     plan_type: str | None = None
     monthly_quota: int | None = None
     used_quota: int | None = None
+    monthly_card_quota: int | None = None
+    used_card_quota: int | None = None
     monthly_cost_limit: float | None = None
     used_cost: float | None = None
     credit_balance: int | None = None
@@ -44,6 +47,8 @@ class AdminUserResponse(UserResponse):
     priority_queue: bool
     monthly_quota: int
     used_quota: int
+    monthly_card_quota: int
+    used_card_quota: int
     monthly_cost_limit: float | None
     used_cost: float
     credit_balance: int
@@ -161,6 +166,20 @@ class AdminAiSettingsResponse(BaseModel):
     validation_threshold: int
     validation_failure_behavior: str
     allow_legacy_vton: bool
+    seo_engine_enabled: bool
+    seo_min_score: int
+    description_min_chars: int
+    description_max_chars: int
+    seo_repair_max_attempts: int
+    require_primary_keyword_in_title: bool
+    warn_low_confidence_attributes: bool
+    enable_russian_grammar_validation: bool
+    enable_keyword_stuffing_detection: bool
+    enable_subject_title_templates: bool
+    include_gender_in_title: bool
+    minimum_grammar_score: int
+    minimum_marketplace_score: int
+    minimum_critical_attribute_score: int
     openai_configured: bool
     fal_configured: bool
     gemini_configured: bool
@@ -176,6 +195,20 @@ class AdminAiSettingsUpdateRequest(BaseModel):
     validation_threshold: int = Field(ge=0, le=100)
     validation_failure_behavior: str = Field(default="warn", pattern="^(block|warn)$")
     allow_legacy_vton: bool
+    seo_engine_enabled: bool = True
+    seo_min_score: int = Field(default=70, ge=0, le=100)
+    description_min_chars: int = Field(default=600, ge=200, le=2000)
+    description_max_chars: int = Field(default=900, ge=200, le=3000)
+    seo_repair_max_attempts: int = Field(default=1, ge=0, le=3)
+    require_primary_keyword_in_title: bool = True
+    warn_low_confidence_attributes: bool = True
+    enable_russian_grammar_validation: bool = True
+    enable_keyword_stuffing_detection: bool = True
+    enable_subject_title_templates: bool = True
+    include_gender_in_title: bool = False
+    minimum_grammar_score: int = Field(default=70, ge=0, le=100)
+    minimum_marketplace_score: int = Field(default=70, ge=0, le=100)
+    minimum_critical_attribute_score: int = Field(default=80, ge=0, le=100)
 
 
 class UsageRecordResponse(BaseModel):

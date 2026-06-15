@@ -52,6 +52,24 @@ services:
       backend:
         condition: service_started
 
+  sync-worker:
+    build:
+      context: ./seo-wb-backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.wb_sync_worker"]
+    env_file:
+      - ./seo-wb-backend/.env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-12345678}@db:5432/seo_wb_db
+    volumes:
+      - ./seo-wb-backend/storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
   finance-worker:
     build:
       context: ./seo-wb-backend
@@ -106,11 +124,13 @@ services:
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_API_URL=http://localhost:8081/api/v1
+        - NEXT_PUBLIC_ENABLE_FINANCE=false
     restart: unless-stopped
     ports:
       - "3030:3000" # Map frontend to 3030 to avoid conflict with port 3000
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8081/api/v1
+      - NEXT_PUBLIC_ENABLE_FINANCE=false
 
 volumes:
   postgres_data:

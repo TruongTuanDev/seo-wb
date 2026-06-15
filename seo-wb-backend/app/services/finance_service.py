@@ -600,6 +600,7 @@ class FinanceSyncService:
         state.started_at = datetime.now(UTC)
         state.finished_at = None
         self._db.commit()
+        state_id = state.id
 
         last_rrd_id = state.last_rrd_id
         inserted = 0
@@ -652,10 +653,12 @@ class FinanceSyncService:
 
             return {"status": state.status, "rowsInserted": inserted, "lastRrdId": state.last_rrd_id}
         except Exception as exc:
-            if state.status == "running":
-                state.status = "failed"
-                state.last_error = str(exc)[:1000]
-                state.finished_at = datetime.now(UTC)
+            self._db.rollback()
+            failed_state = self._db.get(WbFinanceSyncState, state_id)
+            if failed_state is not None and failed_state.status == "running":
+                failed_state.status = "failed"
+                failed_state.last_error = str(exc)[:1000]
+                failed_state.finished_at = datetime.now(UTC)
                 self._db.commit()
             raise
 

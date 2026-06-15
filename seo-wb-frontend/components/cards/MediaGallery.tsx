@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import { GripVertical, ImagePlus, Loader2, WandSparkles, X } from "lucide-react";
 import { FilePreviewImage } from "@/components/cards/FilePreviewImage";
 import type { VariantCardState } from "@/components/cards/types";
@@ -91,6 +91,26 @@ export function getEnglishCategoryKey(category: string): string {
     return "jacket";
   }
   return "garment";
+}
+
+export function getModelGarmentType(category: string): string | null {
+  const cat = (category || "").toLowerCase().trim();
+  if (cat.includes("брюки") || cat.includes("штаны") || cat.includes("леггинсы") || cat.includes("джоггеры") || cat.includes("pants") || cat.includes("джинсы") || cat.includes("jeans") || cat.includes("шорты") || cat.includes("shorts")) {
+    return "pants";
+  }
+  if (cat.includes("юбк") || cat.includes("skirt") || cat.includes("плать") || cat.includes("сарафан") || cat.includes("dress")) {
+    return "dress";
+  }
+  if (cat.includes("рубаш") || cat.includes("блуз") || cat.includes("shirt") || cat.includes("футболк") || cat.includes("майк") || cat.includes("топ") || cat.includes("t-shirt") || cat.includes("худи") || cat.includes("свитшот") || cat.includes("толстовк") || cat.includes("джемпер") || cat.includes("свитер") || cat.includes("пуловер") || cat.includes("кардиган") || cat.includes("hoodie") || cat.includes("куртк") || cat.includes("пальто") || cat.includes("пиджак") || cat.includes("жилет") || cat.includes("ветровк") || cat.includes("бомбер") || cat.includes("jacket")) {
+    return "shirt";
+  }
+  if (cat.includes("костюм") || cat.includes("комбинезон") || cat.includes("комплект") || cat.includes("set") || cat.includes("suit")) {
+    return "suit";
+  }
+  if (cat.includes("обувь") || cat.includes("shoes") || cat.includes("ботин") || cat.includes("сапог") || cat.includes("кроссов")) {
+    return "shoes";
+  }
+  return null;
 }
 
 export interface ImageGenerationStatus {
@@ -207,7 +227,7 @@ interface MediaGalleryProps {
   onSetDraggedImageIndex: (index: number | null) => void;
   onAddImages: (files: FileList) => void;
   onGenerateImages: (input: {
-    frontImage: File;
+    frontImage?: File;
     backImage?: File;
     modelImage?: File;
     modelId?: string;
@@ -262,8 +282,36 @@ export function MediaGallery({
   const [customModelImage, setCustomModelImage] = useState<File | null>(null);
   const [modelSource, setModelSource] = useState<"template" | "upload" | "ai">("template");
   const [isExporting, setIsExporting] = useState<Record<string, boolean>>({});
+  const [isEditingReferences, setIsEditingReferences] = useState(false);
   const [models, setModels] = useState<RuntimeModelTemplate[]>([]);
   const [modelsLoadError, setModelsLoadError] = useState("");
+  const inheritedFrontImage = variant?.images[0] ?? null;
+  const inheritedBackImage = variant?.images[1] ?? null;
+  const effectiveFrontImage = frontImage ?? inheritedFrontImage;
+  const effectiveBackImage = backImage ?? inheritedBackImage;
+  const hasSavedDraftFront = inheritedFrontImage !== null;
+  const hasSavedDraftBack = inheritedBackImage !== null;
+  const isFrontOverride = frontImage !== null;
+  const isBackOverride = backImage !== null;
+  const isUsingSavedDraftReferences = Boolean(
+    (hasSavedDraftFront || hasSavedDraftBack) && !isFrontOverride && !isBackOverride
+  );
+
+  const mappedGarmentType = getModelGarmentType(productCategory);
+  const displayModels = mappedGarmentType
+    ? models.filter((m) => m.garmentType === mappedGarmentType || m.garmentType === "full_body")
+    : models;
+  const modelsToRender = displayModels.length > 0 ? displayModels : models;
+  const effectiveSelectedModel = useMemo(() => {
+    if (selectedModelId && selectedModelId !== "none") {
+      const matchedModel = modelsToRender.find((model) => model.id === selectedModelId);
+      if (matchedModel) {
+        return matchedModel;
+      }
+    }
+    return modelsToRender[0] ?? null;
+  }, [modelsToRender, selectedModelId]);
+  const effectiveSelectedModelId = effectiveSelectedModel?.id ?? "";
 
   const [garmentJson, setGarmentJson] = useState<GarmentJsonPayload | null>(null);
   const [isFetchingGarment, setIsFetchingGarment] = useState(false);
@@ -441,7 +489,7 @@ export function MediaGallery({
   const isFemaleProd = productGender.includes("жен") || productGender.includes("fem") || productGender.includes("girl") || productGender.includes("woman");
   const isMaleProd = productGender.includes("муж") || productGender.includes("маск") || productGender.includes("boy") || productGender.includes("man");
 
-  const selectedModel = models.find((m) => m.id === selectedModelId);
+  const selectedModel = effectiveSelectedModel;
   const isGenderMismatch = selectedModel && (
     (selectedModel.gender.toLowerCase() === "female" && isMaleProd) ||
     (selectedModel.gender.toLowerCase() === "male" && isFemaleProd)
@@ -451,6 +499,7 @@ export function MediaGallery({
   const modelGenderText = selectedModel ? selectedModel.gender : "";
   const isGenerating = generationStatus?.status === "queued" || generationStatus?.status === "processing";
   const isGenerationCompleted = generationStatus?.status === "completed" || generationStatus?.status === "completed_with_warnings";
+  const isLowerBodyProduct = (garmentJson?.garment_area || getGarmentType(productCategory)) === "lower_body";
 
   const handleGeneratedImageAction = async (action: "use_anyway" | "hide" | "approve" | "reject") => {
     if (!draftId || !generationStatus?.id || !selectedGeneratedImage?.image_id) return;
@@ -518,6 +567,23 @@ export function MediaGallery({
     setter(file);
   };
 
+  const selectProductReference = (fileList: FileList | null, setter: (file: File | null) => void) => {
+    setGarmentJson(null);
+    setIsEditingReferences(true);
+    selectFile(fileList, setter);
+  };
+
+  const resetReferenceOverride = (target: "front" | "back") => {
+    setGarmentJson(null);
+    if (target === "front") {
+      setFrontImage(null);
+      setIsEditingReferences(backImage !== null);
+      return;
+    }
+    setBackImage(null);
+    setIsEditingReferences(frontImage !== null);
+  };
+
   const submit = () => {
     if (!effectiveFrontImage) {
       setValidationError("Front product image is required.");
@@ -563,7 +629,7 @@ export function MediaGallery({
         autoGenerateModel: true,
       });
     } else {
-      if (!selectedModelId || selectedModelId === "none") {
+      if (!effectiveSelectedModel) {
         setValidationError("Please select a real model reference before generating catalog images.");
         return;
       }
@@ -571,7 +637,7 @@ export function MediaGallery({
         setValidationError("Only JPG, PNG, or WEBP images are supported.");
         return;
       }
-      const chosenModel = models.find((m) => m.id === selectedModelId);
+      const chosenModel = effectiveSelectedModel;
       if (!chosenModel) {
         setValidationError("Please select a real model reference before generating catalog images.");
         return;
@@ -630,6 +696,101 @@ export function MediaGallery({
               }}
             />
           </label>
+        </div>
+      </div>
+
+      <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50/70 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold text-zinc-950">Product references</div>
+            <div className="mt-1 text-xs text-zinc-500">
+              {isUsingSavedDraftReferences
+                ? "Using saved draft references. You can generate images without uploading again."
+                : effectiveFrontImage
+                  ? "Custom reference for this generation. New images will override the saved draft references only for this job."
+                  : "Upload front and back product photos here first. These references are reused later in the generate flow."}
+            </div>
+          </div>
+          <span
+            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+              garmentJson
+                ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border border-zinc-200 bg-white text-zinc-500"
+            }`}
+          >
+            {garmentJson ? "Analyzed" : "Waiting for analysis"}
+          </span>
+        </div>
+        <div className="mt-4 space-y-3">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <ImageInput
+              label="Front Product Image *"
+              required
+              file={effectiveFrontImage}
+              onChange={(files) => selectProductReference(files, setFrontImage)}
+              badgeLabel={isFrontOverride ? "Override for this job" : hasSavedDraftFront ? "Saved from draft" : undefined}
+              badgeTone={isFrontOverride ? "amber" : "emerald"}
+              helperText={
+                isFrontOverride
+                  ? "Custom reference for this generation."
+                  : hasSavedDraftFront
+                    ? "Using saved draft references."
+                    : "Front image is required before generate."
+              }
+              resetLabel={isFrontOverride && hasSavedDraftFront ? "Use saved draft image again" : undefined}
+              onReset={isFrontOverride && hasSavedDraftFront ? () => resetReferenceOverride("front") : undefined}
+            />
+            <ImageInput
+              label="Back Product Image (Optional)"
+              file={effectiveBackImage}
+              onChange={(files) => selectProductReference(files, setBackImage)}
+              badgeLabel={isBackOverride ? "Override for this job" : hasSavedDraftBack ? "Saved from draft" : undefined}
+              badgeTone={isBackOverride ? "amber" : "emerald"}
+              helperText={
+                isBackOverride
+                  ? "Custom reference for this generation."
+                  : hasSavedDraftBack
+                    ? "Using saved draft references."
+                    : "Back image not provided. Front-only generation is supported."
+              }
+              emptyLabel="Back image not provided. Front-only generation is supported."
+              resetLabel={isBackOverride && hasSavedDraftBack ? "Use saved draft image again" : undefined}
+              onReset={isBackOverride && hasSavedDraftBack ? () => resetReferenceOverride("back") : undefined}
+            />
+          </div>
+          <div
+            className={`rounded-lg px-3 py-2 text-xs ${
+              isUsingSavedDraftReferences
+                ? "border border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border border-amber-200 bg-amber-50 text-amber-800"
+            }`}
+          >
+            {isUsingSavedDraftReferences
+              ? "Using saved draft references. You can generate images without uploading again."
+              : "Custom reference for this generation. New images will override the saved draft references only for this job."}
+          </div>
+        </div>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-xs text-zinc-500">
+            {effectiveFrontImage ? `Front: ${effectiveFrontImage.name}` : "Front image is required before generate."}
+            {effectiveBackImage ? ` Back: ${effectiveBackImage.name}` : " Back image not provided. Front-only generation is supported."}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {effectiveFrontImage ? (
+              <Button type="button" variant="outline" onClick={() => setIsEditingReferences((current) => !current)}>
+                {isEditingReferences ? "Hide override controls" : "Replace references"}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleAnalyzeGarment}
+              isLoading={isAnalyzingGarment || isFetchingGarment}
+              disabled={!effectiveFrontImage}
+            >
+              {garmentJson ? "Re-analyze product" : "Analyze product garment"}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -837,9 +998,18 @@ export function MediaGallery({
           <div className="space-y-5">
               {!garmentJson ? (
                 <div className="space-y-4">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <ImageInput label="Front Product Image *" required file={frontImage} onChange={(files) => selectFile(files, setFrontImage)} />
-                    <ImageInput label="Back Product Image (Optional)" file={backImage} onChange={(files) => selectFile(files, setBackImage)} />
+                  <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700">
+                    Upload product references in the Photos panel first, then analyze the garment before generating images.
+                  </div>
+                  <div className="grid gap-3 text-xs text-zinc-600 sm:grid-cols-2">
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <div className="font-semibold text-zinc-800">Front reference</div>
+                      <div className="mt-1">{frontImage?.name || "Not uploaded yet"}</div>
+                    </div>
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <div className="font-semibold text-zinc-800">Back reference</div>
+                      <div className="mt-1">{backImage?.name || "Optional"}</div>
+                    </div>
                   </div>
                   {validationError && (
                     <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 animate-fade-in">
@@ -990,8 +1160,8 @@ export function MediaGallery({
                         </div>
                       )}
                       <ModelSelector
-                        selectedModelId={selectedModelId}
-                        models={models}
+                        selectedModelId={effectiveSelectedModelId}
+                        models={modelsToRender}
                         onSelectModel={(model) => {
                           setSelectedModelId(model.id);
                           setValidationError("");
@@ -1100,8 +1270,13 @@ export function MediaGallery({
                         : "Front, Side, Walking, Hand On Hip, Sitting, Fabric Detail, Product Detail, Banner")}
                     </div>
                     <div className="mt-2 text-[11px] text-zinc-500">
+                      {isLowerBodyProduct && (
+                        <span className="block text-zinc-700">
+                          Lower-body products keep the main catalog poses framed from the waist down so the pants or skirt stay dominant.
+                        </span>
+                      )}
                       Back view is generated only when a back product image is uploaded.
-                      {!backImage && quantity > 3 && (
+                      {!effectiveBackImage && quantity > 3 && (
                         <span className="block mt-0.5 text-amber-600 font-medium">
                           Note: Back view will be replaced by {quantity === 6 ? "Extra Detail" : "Product Detail"} shot.
                         </span>
@@ -1141,8 +1316,8 @@ export function MediaGallery({
               )}
 
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-                <Button variant="brand" onClick={submit}>
+                <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
+                <Button type="button" variant="brand" onClick={submit}>
                   <WandSparkles size={16} />
                   Generate
                 </Button>
@@ -1160,17 +1335,38 @@ function ImageInput({
   required,
   file,
   onChange,
+  helperText,
+  badgeLabel,
+  badgeTone = "emerald",
+  emptyLabel = "JPG, PNG, WEBP",
+  resetLabel,
+  onReset,
 }: {
   label: string;
   required?: boolean;
   file: File | null;
   onChange: (files: FileList | null) => void;
+  helperText?: string;
+  badgeLabel?: string;
+  badgeTone?: "emerald" | "amber";
+  emptyLabel?: string;
+  resetLabel?: string;
+  onReset?: () => void;
 }) {
+  const badgeClassName = badgeTone === "amber"
+    ? "border border-amber-200 bg-amber-50 text-amber-700"
+    : "border border-emerald-200 bg-emerald-50 text-emerald-700";
+
   return (
     <label className="group flex min-h-40 cursor-pointer flex-col overflow-hidden rounded-lg border border-dashed border-zinc-300 bg-white text-center transition-colors hover:border-brand hover:bg-indigo-50/40">
       {file ? (
         <div className="relative h-32 w-full bg-zinc-100">
           <FilePreviewImage file={file} className="h-full w-full object-contain p-1" alt={label} />
+          {badgeLabel ? (
+            <div className={`absolute left-2 top-2 rounded-full px-2 py-1 text-[11px] font-semibold ${badgeClassName}`}>
+              {badgeLabel}
+            </div>
+          ) : null}
           <div className="absolute inset-x-0 bottom-0 bg-black/65 px-2 py-1 text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
             Click to replace
           </div>
@@ -1178,14 +1374,28 @@ function ImageInput({
       ) : (
         <div className="flex h-32 flex-col items-center justify-center p-3">
           <ImagePlus size={24} className="mb-2 text-zinc-400" />
-          <span className="text-xs text-zinc-500">JPG, PNG, WEBP</span>
+          <span className="text-xs text-zinc-500">{emptyLabel}</span>
         </div>
       )}
       <div className="flex min-h-14 flex-col justify-center px-3 py-2">
         <span className="text-sm font-medium text-zinc-800">
           {label} {required && <span className="text-brand">*</span>}
         </span>
-        {file && <span className="mt-1 line-clamp-1 text-xs text-zinc-500">{file.name}</span>}
+        {file ? <span className="mt-1 line-clamp-1 text-xs text-zinc-500">{file.name}</span> : null}
+        {helperText ? <span className="mt-1 text-xs text-zinc-500">{helperText}</span> : null}
+        {resetLabel && onReset ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onReset();
+            }}
+            className="mt-2 text-xs font-medium text-brand hover:underline"
+          >
+            {resetLabel}
+          </button>
+        ) : null}
       </div>
       <input
         type="file"

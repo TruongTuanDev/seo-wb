@@ -10,10 +10,21 @@ from app.models.card import CardDraft
 from app.models.store import Store
 from app.models.user import User
 from app.schemas.card import CardUploadGroup, ImageAnalysis, ProductInput
+from app.services.admin_runtime import get_effective_ai_runtime_settings
 from app.services.card_generator import CardGenerator
 from app.services.card_payload_enricher import CardPayloadEnricher
 from app.services.garment_analyzer import GarmentAnalyzer
 from app.services.gemini_analyzer import GeminiAnalyzer
+from app.services.product_copy_policy import (
+    build_copy_policy_context,
+    build_seo_title,
+    cleanup_description,
+    cleanup_title,
+    render_description,
+    resolve_product_family,
+)
+from app.services.seo_content_validator import SeoContentValidator
+from app.services.seo_keyword_planner import SeoKeywordPlanner
 from app.services.subject_resolver import SubjectResolver
 from app.services.wb_client import WildberriesClient
 from starlette.concurrency import run_in_threadpool
@@ -29,15 +40,57 @@ class CardFlowService:
         self._wb = WildberriesClient(settings, self._wb_api_key)
 
     async def generate_draft(self, image_bytes: list[bytes], user_input: ProductInput) -> CardDraft:
+        runtime_settings = get_effective_ai_runtime_settings(self._db, self._settings)
         analysis = await run_ai_limited(
             self._settings,
             lambda: run_in_threadpool(GeminiAnalyzer(self._settings).analyze, image_bytes, user_input),
         )
+        garment_json: dict[str, Any] = {}
+        try:
+            garment_json = await run_ai_limited(
+                self._settings,
+                lambda: run_in_threadpool(
+                    GarmentAnalyzer(self._settings).analyze,
+                    image_bytes[0],
+                    image_bytes[1] if len(image_bytes) > 1 else None,
+                    user_input.category or analysis.product_name,
+                    None,
+                    analysis.category or user_input.category,
+                    analysis.gender or user_input.gender,
+                ),
+            )
+        except Exception:
+            garment_json = {}
         subject = await self._resolve_subject(user_input, analysis)
         charcs = await self._wb.get_subject_charcs(int(subject["subjectID"]), locale="ru")
+        attribute_confidence = CardPayloadEnricher(charcs).build_attribute_confidence(
+            subject_id=int(subject["subjectID"]),
+            user_input=user_input,
+            analysis=analysis,
+        )
+        seo_keyword_plan = SeoKeywordPlanner.build_plan(
+            category=user_input.category or analysis.category,
+            subject_name=subject.get("subjectName"),
+            brand=user_input.brand,
+            gender=user_input.gender or analysis.gender,
+            analysis=analysis,
+            user_input=user_input,
+            confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+            wb_characteristics=charcs,
+            product_family_policy=build_copy_policy_context(subject, analysis, user_input),
+        )
         card_payload = await run_ai_limited(
             self._settings,
-            lambda: run_in_threadpool(CardGenerator(self._settings).generate, user_input, analysis, subject, charcs),
+            lambda: run_in_threadpool(
+                CardGenerator(self._settings).generate,
+                user_input,
+                analysis,
+                subject,
+                charcs,
+                garment_json,
+                seo_keyword_plan,
+                attribute_confidence,
+            ),
         )
         raw_payload = [group.model_dump(mode="json", exclude_none=True) for group in card_payload]
         await self._enrich_payload(raw_payload, int(subject["subjectID"]), user_input=user_input, analysis=analysis)
@@ -69,7 +122,7 @@ class CardFlowService:
     async def push_new_cards(self, groups: list[CardUploadGroup], dry_run: bool) -> dict[str, Any] | None:
         payload = [group.model_dump(mode="json", exclude_none=True) for group in groups]
         for group in payload:
-            await self._enrich_payload([group], int(group["subjectID"]))
+            await self._enrich_payload([group], int(group["subjectID"]), enforce_required=True)
         await self._ensure_skus(payload, dry_run=dry_run)
         if dry_run:
             return None
@@ -83,7 +136,7 @@ class CardFlowService:
         subject_id: int | None = None,
     ) -> dict[str, Any] | None:
         if subject_id is not None:
-            await self._enrich_payload({"cardsToAdd": variants}, subject_id)
+            await self._enrich_payload({"cardsToAdd": variants}, subject_id, enforce_required=True)
         await self._ensure_variant_skus(variants, dry_run=dry_run)
         if dry_run:
             return None
@@ -185,6 +238,7 @@ class CardFlowService:
         *,
         user_input: ProductInput | None = None,
         analysis: ImageAnalysis | None = None,
+        enforce_required: bool = False,
     ) -> None:
         charcs = await self._wb.get_subject_charcs(subject_id, locale="ru")
         seasons = await self._wb.get_seasons(locale="ru")
@@ -197,3 +251,252 @@ class CardFlowService:
             user_input=user_input,
             analysis=analysis,
         )
+        finalize_vendor_codes = getattr(CardGenerator, "finalize_vendor_codes_from_characteristics", None)
+        if finalize_vendor_codes:
+            finalize_vendor_codes(payload, charcs)
+        if enforce_required:
+            self._ensure_required_characteristics(payload, charcs)
+
+    @staticmethod
+    def _ensure_required_characteristics(payload: Any, charcs: list[dict[str, Any]]) -> None:
+        required = {
+            int(item["charcID"]): str(item.get("name") or item["charcID"])
+            for item in charcs
+            if item.get("required") and item.get("charcID")
+        }
+        if not required:
+            return
+        variants: list[dict[str, Any]] = []
+        if isinstance(payload, list):
+            for group in payload:
+                if isinstance(group, dict):
+                    variants.extend(group.get("variants") or [])
+        elif isinstance(payload, dict):
+            variants.extend(payload.get("cardsToAdd") or payload.get("variants") or [])
+        for index, variant in enumerate(variants):
+            present = {
+                int(item.get("id") or 0)
+                for item in variant.get("characteristics") or []
+                if item.get("value") not in (None, "", [])
+            }
+            missing = [name for charc_id, name in required.items() if charc_id not in present]
+            if missing:
+                raise AppError(
+                    "missing_required_characteristics",
+                    "Required Wildberries characteristics must be confirmed before push.",
+                    422,
+                    {"variant_index": index, "missing": missing},
+                )
+
+    def _apply_seo_validation(
+        self,
+        payload: list[dict[str, Any]],
+        *,
+        seo_keyword_plan: dict[str, Any],
+        attribute_confidence: dict[str, Any],
+        runtime_settings: Any,
+        subject: dict[str, Any] | None = None,
+        analysis: ImageAnalysis | None = None,
+        user_input: ProductInput | None = None,
+        wb_characteristics: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        min_chars = int(getattr(runtime_settings, "description_min_chars", 600) or 600)
+        max_chars = int(getattr(runtime_settings, "description_max_chars", 900) or 900)
+        min_score = int(getattr(runtime_settings, "seo_min_score", 70) or 70)
+        repair_attempts = max(0, int(getattr(runtime_settings, "seo_repair_max_attempts", 1) or 0))
+        require_primary_keyword_in_title = bool(getattr(runtime_settings, "require_primary_keyword_in_title", True))
+        include_gender_in_title = bool(getattr(runtime_settings, "include_gender_in_title", False))
+        min_grammar_score = int(getattr(runtime_settings, "minimum_grammar_score", 70) or 70)
+        min_marketplace_score = int(getattr(runtime_settings, "minimum_marketplace_score", 70) or 70)
+        min_critical_attribute_score = int(getattr(runtime_settings, "minimum_critical_attribute_score", 80) or 80)
+        scorecards: list[dict[str, Any]] = []
+        for group in payload:
+            for variant in group.get("variants", []) or []:
+                title = str(variant.get("title") or "")
+                description = str(variant.get("description") or "")
+                final_validator_result: dict[str, Any] | None = None
+                policy = resolve_product_family(subject or {}, analysis, user_input)
+                title_attributes = (
+                    self._seo_title_attributes(user_input, analysis, subject or {}, seo_keyword_plan, attribute_confidence)
+                    if analysis is not None and user_input is not None and subject is not None
+                    else {}
+                )
+
+                for attempt in range(repair_attempts + 1):
+                    validator_result = SeoContentValidator.validate(
+                        title=title,
+                        description=description,
+                        seo_keyword_plan=seo_keyword_plan,
+                        confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+                        inferred_attributes=attribute_confidence.get("inferred_attributes"),
+                        min_chars=min_chars,
+                        max_chars=max_chars,
+                        auto_fix=True,
+                    )
+                    description = str(validator_result.get("fixed_description") or description or "")
+
+                    primary_keyword = str(seo_keyword_plan.get("primary_keyword") or "").strip()
+                    needs_title_repair = (
+                        require_primary_keyword_in_title
+                        and primary_keyword
+                        and primary_keyword.casefold() not in title.casefold()
+                    )
+                    if needs_title_repair and analysis is not None and user_input is not None and subject is not None:
+                        rebuilt_title = build_seo_title(
+                            subject.get("subjectName"),
+                            analysis.gender or user_input.gender,
+                            title_attributes,
+                            seo_keyword_plan,
+                            brand=(user_input.brand or "").strip() or None,
+                            include_gender_in_title=include_gender_in_title,
+                        )
+                        title = cleanup_title(
+                            str(rebuilt_title.get("title") or title),
+                            str(subject.get("subjectName") or "Товар"),
+                            analysis,
+                            user_input,
+                        )
+
+                    final_validator_result = SeoContentValidator.validate(
+                        title=title,
+                        description=description,
+                        seo_keyword_plan=seo_keyword_plan,
+                        confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+                        inferred_attributes=attribute_confidence.get("inferred_attributes"),
+                        min_chars=min_chars,
+                        max_chars=max_chars,
+                        auto_fix=False,
+                    )
+                    candidate_scorecard = SeoContentValidator.build_scorecard(
+                        title=title,
+                        description=description,
+                        seo_keyword_plan=seo_keyword_plan,
+                        validator_result=final_validator_result,
+                        confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+                        inferred_attributes=attribute_confidence.get("inferred_attributes"),
+                        subject_name=(subject or {}).get("subjectName"),
+                        wb_characteristics=wb_characteristics,
+                        low_confidence_attributes=attribute_confidence.get("low_confidence_attributes"),
+                    )
+                    if (
+                        candidate_scorecard.get("seo_score", 0) >= min_score
+                        and candidate_scorecard.get("grammar_score", 0) >= min_grammar_score
+                        and candidate_scorecard.get("marketplace_score", 0) >= min_marketplace_score
+                        and candidate_scorecard.get("critical_attribute_score", 0) >= min_critical_attribute_score
+                        and not candidate_scorecard.get("blocking_issues")
+                        and final_validator_result.get("valid", False)
+                    ):
+                        break
+
+                    if attempt >= repair_attempts:
+                        break
+
+                    if analysis is not None and user_input is not None and subject is not None:
+                        rebuilt_title = build_seo_title(
+                            subject.get("subjectName"),
+                            analysis.gender or user_input.gender,
+                            title_attributes,
+                            seo_keyword_plan,
+                            brand=(user_input.brand or "").strip() or None,
+                            include_gender_in_title=include_gender_in_title,
+                        )
+                        title = cleanup_title(
+                            str(rebuilt_title.get("title") or title),
+                            str(subject.get("subjectName") or "Товар"),
+                            analysis,
+                            user_input,
+                        )
+                        regenerated_description = render_description(policy, title=title, analysis=analysis, user_input=user_input)
+                        description = cleanup_description(
+                            regenerated_description,
+                            title=title,
+                            subject=subject,
+                            analysis=analysis,
+                            user_input=user_input,
+                        )
+
+                variant["title"] = title
+                variant["description"] = description
+                validator_result = final_validator_result or {
+                    "score": 0,
+                    "issues": ["SEO validation did not run"],
+                    "suggestions": [],
+                }
+                scorecards.append(
+                    SeoContentValidator.build_scorecard(
+                        title=title,
+                        description=description,
+                        seo_keyword_plan=seo_keyword_plan,
+                        validator_result=validator_result,
+                        confirmed_attributes=attribute_confidence.get("confirmed_attributes"),
+                        inferred_attributes=attribute_confidence.get("inferred_attributes"),
+                        subject_name=(subject or {}).get("subjectName"),
+                        wb_characteristics=wb_characteristics,
+                        low_confidence_attributes=attribute_confidence.get("low_confidence_attributes"),
+                    )
+                )
+        if not scorecards:
+            return {
+                "seo_score": 0,
+                "title_score": 0,
+                "description_score": 0,
+                "attributes_score": 0,
+                "keyword_coverage_score": 0,
+                "issues": ["No variants generated"],
+                "suggestions": ["Generate at least one variant"],
+                "status": "poor",
+            }
+        aggregate = {
+            "seo_score": int(round(sum(item["seo_score"] for item in scorecards) / len(scorecards))),
+            "title_score": int(round(sum(item["title_score"] for item in scorecards) / len(scorecards))),
+            "description_score": int(round(sum(item["description_score"] for item in scorecards) / len(scorecards))),
+            "attributes_score": int(round(sum(item["attributes_score"] for item in scorecards) / len(scorecards))),
+            "keyword_coverage_score": int(round(sum(item["keyword_coverage_score"] for item in scorecards) / len(scorecards))),
+            "keyword_score": int(round(sum(item.get("keyword_score", 0) for item in scorecards) / len(scorecards))),
+            "grammar_score": int(round(sum(item.get("grammar_score", 0) for item in scorecards) / len(scorecards))),
+            "marketplace_score": int(round(sum(item.get("marketplace_score", 0) for item in scorecards) / len(scorecards))),
+            "subject_rule_score": int(round(sum(item.get("subject_rule_score", 0) for item in scorecards) / len(scorecards))),
+            "critical_attribute_score": int(round(sum(item.get("critical_attribute_score", 0) for item in scorecards) / len(scorecards))),
+            "semantic_consistency_score": int(round(sum(item.get("semantic_consistency_score", 0) for item in scorecards) / len(scorecards))),
+            "issues": [],
+            "suggestions": [],
+            "blocking_issues": [],
+            "status": "poor",
+            "variants": scorecards,
+        }
+        for item in scorecards:
+            aggregate["issues"].extend(item.get("issues", []))
+            aggregate["suggestions"].extend(item.get("suggestions", []))
+            aggregate["blocking_issues"].extend(item.get("blocking_issues", []))
+        aggregate["issues"] = list(dict.fromkeys(aggregate["issues"]))[:10]
+        aggregate["suggestions"] = list(dict.fromkeys(aggregate["suggestions"]))[:10]
+        aggregate["blocking_issues"] = list(dict.fromkeys(aggregate["blocking_issues"]))
+        score = aggregate["seo_score"]
+        aggregate["status"] = (
+            "needs_review"
+            if aggregate["blocking_issues"]
+            else "excellent" if score >= 85 else "good" if score >= 70 else "needs_review" if score >= 50 else "poor"
+        )
+        return aggregate
+
+    @staticmethod
+    def _seo_title_attributes(
+        user_input: ProductInput,
+        analysis: ImageAnalysis,
+        subject: dict[str, Any],
+        seo_keyword_plan: dict[str, Any],
+        attribute_confidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        confirmed = (attribute_confidence or {}).get("confirmed_attributes") or {}
+        inferred = (attribute_confidence or {}).get("inferred_attributes") or {}
+        seo_inputs = user_input.seo_inputs if user_input else None
+        return {
+            "material": getattr(seo_inputs, "material", None) or confirmed.get("composition") or inferred.get("composition") or analysis.material,
+            "color": getattr(seo_inputs, "color", None) or confirmed.get("color") or inferred.get("color") or analysis.color or user_input.color,
+            "fit": getattr(seo_inputs, "fit", None) or confirmed.get("fit") or inferred.get("fit") or analysis.fit_type,
+            "season": getattr(seo_inputs, "season", None) or confirmed.get("season") or inferred.get("season") or analysis.season,
+            "quantity_in_set": getattr(seo_inputs, "quantity_in_set", None),
+            "key_feature": getattr(seo_inputs, "key_feature", None),
+            "subject": subject.get("subjectName"),
+            "primary_keyword": seo_keyword_plan.get("primary_keyword"),
+        }

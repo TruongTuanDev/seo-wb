@@ -112,3 +112,67 @@ def test_copied_bearer_token_fails_with_different_user_agent(client):
     )
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "invalid_token_fingerprint"
+
+
+def test_authenticated_user_can_update_own_profile_name(client):
+    test_client, SessionLocal, settings = client
+    with SessionLocal() as db:
+        db.add(User(name="Seller", email="seller@example.com", password_hash=hash_password("password123")))
+        db.commit()
+
+    login = test_client.post("/api/v1/auth/login", json={"email": "seller@example.com", "password": "password123"})
+    assert login.status_code == 200
+    csrf = test_client.cookies.get(settings.csrf_cookie_name)
+
+    response = test_client.patch("/api/v1/auth/me", json={"display_name": "Updated Seller"}, headers={"x-csrf-token": csrf})
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Updated Seller"
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.email == "seller@example.com").one()
+        assert user.name == "Updated Seller"
+
+
+def test_change_password_requires_valid_current_password(client):
+    test_client, SessionLocal, settings = client
+    with SessionLocal() as db:
+        db.add(User(name="Seller", email="seller@example.com", password_hash=hash_password("password123")))
+        db.commit()
+
+    login = test_client.post("/api/v1/auth/login", json={"email": "seller@example.com", "password": "password123"})
+    assert login.status_code == 200
+    csrf = test_client.cookies.get(settings.csrf_cookie_name)
+
+    wrong_password = test_client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "wrong-password", "new_password": "new-password-123"},
+        headers={"x-csrf-token": csrf},
+    )
+
+    assert wrong_password.status_code == 401
+    assert wrong_password.json()["error"]["code"] == "invalid_current_password"
+
+
+def test_change_password_updates_stored_hash_and_allows_new_login(client):
+    test_client, SessionLocal, settings = client
+    with SessionLocal() as db:
+        db.add(User(name="Seller", email="seller@example.com", password_hash=hash_password("password123")))
+        db.commit()
+
+    login = test_client.post("/api/v1/auth/login", json={"email": "seller@example.com", "password": "password123"})
+    assert login.status_code == 200
+    csrf = test_client.cookies.get(settings.csrf_cookie_name)
+
+    response = test_client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "password123", "new_password": "new-password-123"},
+        headers={"x-csrf-token": csrf},
+    )
+
+    assert response.status_code == 204
+
+    old_login = test_client.post("/api/v1/auth/login", json={"email": "seller@example.com", "password": "password123"})
+    assert old_login.status_code == 401
+
+    new_login = test_client.post("/api/v1/auth/login", json={"email": "seller@example.com", "password": "new-password-123"})
+    assert new_login.status_code == 200

@@ -47,6 +47,24 @@ services:
     volumes:
       - backend_storage:/app/storage
 
+  sync-worker:
+    build:
+      context: .
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.wb_sync_worker"]
+    env_file:
+      - ./deploy/env/backend.env
+      - ./deploy/env/backend.runtime.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-seo_wb_db}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    volumes:
+      - backend_storage:/app/storage
+
   finance-worker:
     build:
       context: .

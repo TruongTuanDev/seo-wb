@@ -85,6 +85,15 @@ def test_gpt_prompt_builder():
     assert "STRICT GARMENT PRESERVATION MODE" in strict_prompt
     assert "main_color" in strict_prompt
     assert "silhouette" in strict_prompt
+    assert "waist down" in strict_prompt.lower()
+
+    strong_prompt = GPTPromptBuilder.build_strong_realism_prompt(
+        garment_json,
+        "studio",
+        "back",
+        output_type="catalog",
+    )
+    assert "waist down" in strong_prompt.lower()
 
 
 def test_garment_validator_failures():

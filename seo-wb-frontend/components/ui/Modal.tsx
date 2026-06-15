@@ -46,7 +46,8 @@ export function Modal({ isOpen, onClose, title, description, children, className
             <h2 className="text-lg font-semibold text-zinc-950">{title}</h2>
             {description && <p className="text-sm text-zinc-500 mt-1">{description}</p>}
           </div>
-          <button 
+          <button
+            type="button"
             onClick={onClose}
             className="rounded-full p-1.5 text-zinc-500 transition-all duration-150 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
           >

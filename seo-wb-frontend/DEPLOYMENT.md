@@ -38,6 +38,7 @@ Production frontend env:
 ```env
 NEXT_PUBLIC_API_URL=https://api.your-domain.com/api/v1
 NEXT_PUBLIC_CSRF_COOKIE_NAME=seller_wb_csrf
+NEXT_PUBLIC_ENABLE_FINANCE=false
 FRONTEND_HTTP_PORT=3000
 ```
 
