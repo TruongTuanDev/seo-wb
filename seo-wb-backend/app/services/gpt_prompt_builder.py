@@ -18,9 +18,9 @@ STYLE_COMPATIBILITY_MAPPING = {
 
 POSES = {
     "front": "Front-facing full-body catalog pose. Standing naturally, looking at camera, arms relaxed.",
-    "full_front": "Full-front catalog image. Show the model full-body or three-quarter body so the buyer understands the complete outfit styling, while the product remains the main item.",
-    "side_45": "45-degree side catalog pose. Body turned slightly, face visible, full garment visible.",
-    "walking": "Natural walking fashion catalog pose with a clean lifestyle background. One foot stepping forward, product clearly visible and prioritized.",
+    "full_front": "Full-front catalog image. Show the model full-body or three-quarter body in a clean balanced stance so the buyer understands the complete outfit styling. This must look distinct from any crop slot.",
+    "side_45": "45-degree side catalog pose. Body turned slightly to reveal silhouette and side seam structure, face visible, full garment visible.",
+    "walking": "Natural walking fashion catalog pose with a clean lifestyle background. One foot stepping forward, torso slightly shifting with motion, product clearly visible and visually different from a static front pose.",
     "back": "Back-facing catalog pose. Show the back of the garment clearly. Use only if product back image exists.",
     "hand_on_hip": "One hand on hip, fashion catalog stance, full garment visible.",
     "sitting": "Sitting on a simple white cube, professional catalog pose, garment clearly visible.",
@@ -29,11 +29,11 @@ POSES = {
 
 FOCUSED_POSES = {
     "front": "Front-facing product-focused crop. Keep the product straight to camera and let the product dominate the frame.",
-    "crop_front": "Front-facing product-focused crop. Keep the product straight to camera and let the product dominate the frame.",
+    "crop_front": "Front-facing waist-to-shoes product-focused crop. Keep the waistband fully visible near the top of frame, keep both legs and hems visible, and let the product dominate the frame.",
     "side_45": "45-degree product-focused crop. Keep the product visible from the side angle and let the product dominate the frame.",
-    "crop_side_45": "45-degree side product-focused crop. Show product width, silhouette, side seam and fit clearly. Let the product dominate the frame.",
+    "crop_side_45": "45-degree side waist-to-shoes product-focused crop. Show product width, silhouette, side seam and fit clearly. Make this look different from the front crop by rotating the hips/body to a real side angle.",
     "back": "Back-facing product-focused crop. Show the back of the product clearly and let the product dominate the frame.",
-    "crop_back": "Back-facing product-focused crop. Show the back construction, waistband/back neckline, pockets, seams, hem and fit clearly. Let the product dominate the frame.",
+    "crop_back": "Back-facing waist-to-shoes product-focused crop. Show the back construction, full back waistband, pockets, seams, hem and fit clearly. Make this look different from the front crop by showing the rear view only.",
     "banner_focus": "Product-focused marketplace banner crop. Use a clean composition where the product dominates the frame."
 }
 
@@ -238,7 +238,9 @@ The product itself must remain visually identical to the source.
         if has_model_reference:
             model_reference_prompt = (
                 "Use the first image as the exact model reference.\n"
-                "Preserve the model's real face, identity, skin texture, body proportions, hairstyle and pose direction.\n\n"
+                "Preserve the model's real face, identity, skin texture, body proportions and hairstyle.\n"
+                "Do not lock the generated image to the original stance from the reference photo.\n"
+                "Follow the requested pose, camera angle and framing for each output slot.\n\n"
             )
         else:
             model_reference_prompt = (
@@ -481,7 +483,10 @@ The product itself must remain visually identical to the source.
         model_profile_block = GPTPromptBuilder._model_profile_block(gender_override_json, has_model_reference=has_model_reference)
 
         if has_model_reference:
-            model_ref_inst = "Use image 1 as the exact model reference."
+            model_ref_inst = (
+                "Use image 1 as the exact model reference for identity, face and body proportions. "
+                "Do not copy the original stance; instead follow the requested pose and framing for this slot."
+            )
             product_ref_inst = "Use image 2 as the exact product reference."
         else:
             model_ref_inst = ""

@@ -115,8 +115,18 @@ def test_gpt_prompt_builder():
         "crop_side_45",
         product_focus=True,
     )
-    assert "45-degree side product-focused crop" in side_crop_prompt
+    assert "45-degree side waist-to-shoes product-focused crop" in side_crop_prompt
     assert "leg width" in side_crop_prompt
+    assert "real side angle" in side_crop_prompt
+
+    front_crop_prompt = GPTPromptBuilder.build_prompt(
+        garment_json,
+        "studio",
+        "crop_front",
+        product_focus=True,
+    )
+    assert "waist-to-shoes product-focused crop" in front_crop_prompt
+    assert "waistband fully visible near the top of frame" in front_crop_prompt
 
     lifestyle_prompt = GPTPromptBuilder.build_prompt(garment_json, "studio", "walking")
     assert "LIFESTYLE/WALKING STYLING" in lifestyle_prompt
@@ -139,6 +149,7 @@ def test_gpt_prompt_builder():
     assert "STRICT GARMENT PRESERVATION MODE" in strict_prompt
     assert "main_color" in strict_prompt
     assert "silhouette" in strict_prompt
+    assert "Do not lock the generated image to the original stance" in strict_prompt
 
 
 def test_complementary_styling_respects_product_area():
