@@ -401,6 +401,12 @@ def build_simplified_catalog_tasks(
         return Path("storage/models") / "model1.png"
 
     def resolve_pose(desired_pose: str) -> str:
+        desired_pose = {
+            "crop_front": "front",
+            "full_front": "front",
+            "crop_side_45": "side_45",
+            "crop_back": "back",
+        }.get(desired_pose, desired_pose)
         if desired_pose in ["front", "side_45", "back", "walking", "hand_on_hip", "sitting"]:
             if desired_pose in available_poses:
                 return desired_pose
@@ -420,7 +426,7 @@ def build_simplified_catalog_tasks(
         if ttype == "catalog":
             resolved = resolve_pose(pose_name)
             p_path = get_model_path_for_pose(resolved)
-            g_url = back_data_uri if (pose_name == "back" and has_back_image and back_data_uri) else front_data_uri
+            g_url = back_data_uri if (pose_name in {"back", "crop_back"} and has_back_image and back_data_uri) else front_data_uri
             tasks.append({
                 "type": "vton_raw",
                 "pose": resolved,

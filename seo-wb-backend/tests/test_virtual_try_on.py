@@ -561,9 +561,9 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
         model_metadata={"availablePoses": ["front", "side_45", "walking"]}
     )
     assert len(tasks_3) == 3
-    assert tasks_3[0]["label"] == "Crop"
+    assert tasks_3[0]["label"] == "Crop Front"
     assert tasks_3[0]["product_focus"] is True
-    assert tasks_3[1]["label"] == "Front"
+    assert tasks_3[1]["label"] == "Full Front"
     assert tasks_3[1]["product_focus"] is False
     assert tasks_3[2]["label"] == "Detail"
     
@@ -578,11 +578,11 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
         model_metadata={"availablePoses": ["front", "side_45", "back", "walking"]}
     )
     assert len(tasks_6_back) == 6
-    assert [task["label"] for task in tasks_6_back] == ["Front", "Side", "Back", "Lifestyle", "Detail", "Banner"]
+    assert [task["label"] for task in tasks_6_back] == ["Crop Front", "Crop Side 45", "Crop Back", "Full Front", "Lifestyle Walking", "Detail"]
     assert tasks_6_back[2]["pose"] == "back"
-    assert {task["label"] for task in tasks_6_back if task["product_focus"]} == {"Front", "Side", "Back"}
+    assert {task["label"] for task in tasks_6_back if task["product_focus"]} == {"Crop Front", "Crop Side 45", "Crop Back"}
 
-    # 3. Test quantity 6 without back image (replaces back with Extra Detail)
+    # 3. Test quantity 6 without back image keeps the crop-back slot but falls back to the front model pose.
     tasks_6_no_back = build_simplified_catalog_tasks(
         model_id="model_1",
         quantity=6,
@@ -593,9 +593,9 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
         model_metadata={"availablePoses": ["front", "side_45", "walking"]}
     )
     assert len(tasks_6_no_back) == 6
-    assert [task["label"] for task in tasks_6_no_back] == ["Front", "Side", "Lifestyle", "Detail", "Extra Detail", "Banner"]
-    assert tasks_6_no_back[4]["type"] == "front_detail" # mapped Extra Detail to front_detail
-    assert {task["label"] for task in tasks_6_no_back if task["product_focus"]} == {"Front", "Side", "Extra Detail"}
+    assert [task["label"] for task in tasks_6_no_back] == ["Crop Front", "Crop Side 45", "Crop Back", "Full Front", "Lifestyle Walking", "Detail"]
+    assert tasks_6_no_back[2]["pose"] == "front"
+    assert {task["label"] for task in tasks_6_no_back if task["product_focus"]} == {"Crop Front", "Crop Side 45", "Crop Back"}
 
     # 4. Test quantity 8 with back image
     tasks_8_back = build_simplified_catalog_tasks(
@@ -653,8 +653,10 @@ def test_simplified_workflow_quantities(monkeypatch, tmp_path):
         model_metadata={"availablePoses": ["front"]}
     )
     assert len(tasks_fallback) == 6
-    assert tasks_fallback[1]["label"] == "Side"
+    assert tasks_fallback[1]["label"] == "Crop Side 45"
     assert tasks_fallback[1]["pose"] == "front" # side_45 falls back to front
-    assert tasks_fallback[3]["label"] == "Lifestyle"
-    assert tasks_fallback[3]["pose"] == "front" # walking falls back to front
+    assert tasks_fallback[3]["label"] == "Full Front"
+    assert tasks_fallback[3]["pose"] == "front"
+    assert tasks_fallback[4]["label"] == "Lifestyle Walking"
+    assert tasks_fallback[4]["pose"] == "front" # walking falls back to front
 

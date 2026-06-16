@@ -104,10 +104,29 @@ def test_gpt_prompt_builder():
         product_focus=True,
     )
     assert "PRODUCT-FOCUSED CAMERA FRAMING" in focused_prompt
-    assert "Frame primarily from the waist to the feet." in focused_prompt
-    assert "The lower-body product must occupy most of the image." in focused_prompt
+    assert "Frame primarily from the waist to the shoes." in focused_prompt
+    assert "The lower-body product must occupy 75-85% of the image." in focused_prompt
     assert "Front-facing product-focused crop" in focused_prompt
     assert "Front-facing full-body catalog pose" not in focused_prompt
+
+    side_crop_prompt = GPTPromptBuilder.build_prompt(
+        garment_json,
+        "studio",
+        "crop_side_45",
+        product_focus=True,
+    )
+    assert "45-degree side product-focused crop" in side_crop_prompt
+    assert "leg width" in side_crop_prompt
+
+    lifestyle_prompt = GPTPromptBuilder.build_prompt(garment_json, "studio", "walking")
+    assert "LIFESTYLE/WALKING STYLING" in lifestyle_prompt
+    assert "subtle relevant accessories" in lifestyle_prompt
+    assert "must never cover the waistband" in lifestyle_prompt
+
+    detail_prompt = GPTPromptBuilder.build_detail_prompt(garment_json, "detail", "studio")
+    assert "lower-body product detail shot" in detail_prompt
+    assert "waistband" in detail_prompt
+    assert "Do not show a shirt" in detail_prompt
 
     # Retry Prompt (Strict Garment Preservation Mode)
     strict_prompt = GPTPromptBuilder.build_prompt(
@@ -181,22 +200,22 @@ def test_garment_validator_failures():
 def test_build_tasks_quantity_rules():
     tasks_3 = GPTImageCatalogService.build_tasks(3, has_back_image=True)
     assert len(tasks_3) == 3
-    assert [task["label"] for task in tasks_3] == ["Crop", "Front", "Detail"]
+    assert [task["label"] for task in tasks_3] == ["Crop Front", "Full Front", "Detail"]
     assert sum(bool(task["product_focus"]) for task in tasks_3) == 1
-    assert {task["label"] for task in tasks_3 if task["product_focus"]} == {"Crop"}
-    assert not next(task for task in tasks_3 if task["label"] == "Front")["product_focus"]
+    assert {task["label"] for task in tasks_3 if task["product_focus"]} == {"Crop Front"}
+    assert not next(task for task in tasks_3 if task["label"] == "Full Front")["product_focus"]
 
     tasks_6_back = GPTImageCatalogService.build_tasks(6, has_back_image=True)
     assert len(tasks_6_back) == 6
-    assert [task["label"] for task in tasks_6_back] == ["Front", "Side", "Back", "Lifestyle", "Detail", "Banner"]
+    assert [task["label"] for task in tasks_6_back] == ["Crop Front", "Crop Side 45", "Crop Back", "Full Front", "Lifestyle Walking", "Detail"]
     assert sum(bool(task["product_focus"]) for task in tasks_6_back) == 3
-    assert {task["label"] for task in tasks_6_back if task["product_focus"]} == {"Front", "Side", "Back"}
+    assert {task["label"] for task in tasks_6_back if task["product_focus"]} == {"Crop Front", "Crop Side 45", "Crop Back"}
 
     tasks_6_no_back = GPTImageCatalogService.build_tasks(6, has_back_image=False)
     assert len(tasks_6_no_back) == 6
-    assert [task["label"] for task in tasks_6_no_back] == ["Front", "Side", "Lifestyle", "Detail", "Extra Detail", "Banner"]
+    assert [task["label"] for task in tasks_6_no_back] == ["Crop Front", "Crop Side 45", "Crop Back", "Full Front", "Lifestyle Walking", "Detail"]
     assert sum(bool(task["product_focus"]) for task in tasks_6_no_back) == 3
-    assert {task["label"] for task in tasks_6_no_back if task["product_focus"]} == {"Front", "Side", "Extra Detail"}
+    assert {task["label"] for task in tasks_6_no_back if task["product_focus"]} == {"Crop Front", "Crop Side 45", "Crop Back"}
 
     tasks_8_back = GPTImageCatalogService.build_tasks(8, has_back_image=True)
     assert len(tasks_8_back) == 8
@@ -417,7 +436,7 @@ async def test_fast_image_mode_skips_gemini_and_publishes_partial_state(tmp_path
                 "quality_check_enabled": False,
                 "garment_json": {"product_type": "pants", "garment_area": "lower_body"},
                 "override_tasks": [
-                    {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"}
+                    {"pose": "crop_front", "type": "catalog", "label": "Crop Front", "output_type": "catalog", "validation_pose": "front", "product_focus": True}
                 ],
             },
         },
@@ -519,8 +538,8 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
             "model": "gpt-image-2",
             "override_tasks": [
                 {"pose": "detail", "type": "detail", "label": "Detail", "output_type": "detail", "validation_pose": "detail"},
-                {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
-                {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
+                {"pose": "crop_front", "type": "catalog", "label": "Crop Front", "output_type": "catalog", "validation_pose": "front", "product_focus": True},
+                {"pose": "full_front", "type": "catalog", "label": "Full Front", "output_type": "catalog", "validation_pose": "front"},
             ],
             "runtime_config": {
                 "validation_failure_behavior": "warn"
@@ -556,9 +575,9 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
     assert job_calls_metadata["retry_budget_remaining"] == 0
     assert job_calls_metadata["retry_skipped_due_to_limit"] is True
     
-    front_img = next(img for img in result["images"] if img["label"] == "Front")
+    front_img = next(img for img in result["images"] if img["label"] == "Crop Front")
     detail_img = next(img for img in result["images"] if img["label"] == "Detail")
-    banner_img = next(img for img in result["images"] if img["label"] == "Banner")
+    full_front_img = next(img for img in result["images"] if img["label"] == "Full Front")
     
     assert front_img["retry_used"] is True
     assert front_img["retry_skipped_due_to_limit"] is False
@@ -569,9 +588,9 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
     assert detail_img["retry_priority"] == 7
     assert any("Validation retry skipped because OpenAI call limit was reached." in w for w in detail_img["validation_result"]["warnings"])
     
-    assert banner_img["retry_used"] is False
-    assert banner_img["retry_skipped_due_to_limit"] is True
-    assert banner_img["retry_priority"] == 8
+    assert full_front_img["retry_used"] is False
+    assert full_front_img["retry_skipped_due_to_limit"] is True
+    assert full_front_img["retry_priority"] == 1
     assert any("Validation retry skipped because OpenAI call limit was reached." in w for w in banner_img["validation_result"]["warnings"])
 
     # ----------------------------------------------------
@@ -584,12 +603,12 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
             "style": "studio",
             "model": "gpt-image-2",
             "override_tasks": [
-                {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
-                {"pose": "side_45", "type": "catalog", "label": "Side", "output_type": "catalog", "validation_pose": "side_45"},
-                {"pose": "back", "type": "catalog", "label": "Back", "output_type": "catalog", "validation_pose": "back"},
-                {"pose": "walking", "type": "lifestyle", "label": "Lifestyle", "output_type": "lifestyle", "validation_pose": None},
+                {"pose": "crop_front", "type": "catalog", "label": "Crop Front", "output_type": "catalog", "validation_pose": "front", "product_focus": True},
+                {"pose": "crop_side_45", "type": "catalog", "label": "Crop Side 45", "output_type": "catalog", "validation_pose": "side_45", "product_focus": True},
+                {"pose": "crop_back", "type": "catalog", "label": "Crop Back", "output_type": "catalog", "validation_pose": "back", "product_focus": True},
+                {"pose": "full_front", "type": "catalog", "label": "Full Front", "output_type": "catalog", "validation_pose": "front"},
+                {"pose": "walking", "type": "lifestyle", "label": "Lifestyle Walking", "output_type": "lifestyle", "validation_pose": None},
                 {"pose": "detail", "type": "detail", "label": "Detail", "output_type": "detail", "validation_pose": "detail"},
-                {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
             ],
             "runtime_config": {
                 "validation_failure_behavior": "warn"
@@ -619,16 +638,17 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
     assert job_calls_metadata_6["retry_budget_remaining"] == 0
     assert job_calls_metadata_6["retry_skipped_due_to_limit"] is True
     
-    img_front = next(img for img in result_6["images"] if img["label"] == "Front")
-    img_side = next(img for img in result_6["images"] if img["label"] == "Side")
-    img_back = next(img for img in result_6["images"] if img["label"] == "Back")
-    img_lifestyle = next(img for img in result_6["images"] if img["label"] == "Lifestyle")
+    img_front = next(img for img in result_6["images"] if img["label"] == "Crop Front")
+    img_side = next(img for img in result_6["images"] if img["label"] == "Crop Side 45")
+    img_back = next(img for img in result_6["images"] if img["label"] == "Crop Back")
+    img_full_front = next(img for img in result_6["images"] if img["label"] == "Full Front")
+    img_lifestyle = next(img for img in result_6["images"] if img["label"] == "Lifestyle Walking")
     img_detail = next(img for img in result_6["images"] if img["label"] == "Detail")
-    img_banner = next(img for img in result_6["images"] if img["label"] == "Banner")
     
     assert img_front["retry_used"] is True
     assert img_side["retry_skipped_due_to_limit"] is True
     assert img_back["retry_skipped_due_to_limit"] is True
+    assert img_full_front["retry_skipped_due_to_limit"] is True
     
     assert img_lifestyle["retry_skipped_due_to_limit"] is True
     assert img_detail["retry_skipped_due_to_limit"] is True

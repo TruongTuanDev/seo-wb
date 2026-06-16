@@ -131,28 +131,28 @@ def _build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str,
 
     if quantity == 3:
         return [
-            {"pose": "front", "type": "catalog", "label": "Crop", "output_type": "catalog", "validation_pose": "front"},
-            {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
+            {"pose": "crop_front", "type": "catalog", "label": "Crop Front", "output_type": "catalog", "validation_pose": "front"},
+            {"pose": "full_front", "type": "catalog", "label": "Full Front", "output_type": "catalog", "validation_pose": "front"},
             {"pose": "detail", "type": "detail", "label": "Detail", "output_type": "detail", "validation_pose": "detail"},
         ]
     elif quantity == 6:
         if has_back_image:
             return [
-                {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
-                {"pose": "side_45", "type": "catalog", "label": "Side", "output_type": "catalog", "validation_pose": "side_45"},
-                {"pose": "back", "type": "catalog", "label": "Back", "output_type": "catalog", "validation_pose": "back"},
-                {"pose": "walking", "type": "lifestyle", "label": "Lifestyle", "output_type": "lifestyle", "validation_pose": None},
+                {"pose": "crop_front", "type": "catalog", "label": "Crop Front", "output_type": "catalog", "validation_pose": "front"},
+                {"pose": "crop_side_45", "type": "catalog", "label": "Crop Side 45", "output_type": "catalog", "validation_pose": "side_45"},
+                {"pose": "crop_back", "type": "catalog", "label": "Crop Back", "output_type": "catalog", "validation_pose": "back"},
+                {"pose": "full_front", "type": "catalog", "label": "Full Front", "output_type": "catalog", "validation_pose": "front"},
+                {"pose": "walking", "type": "lifestyle", "label": "Lifestyle Walking", "output_type": "lifestyle", "validation_pose": None},
                 {"pose": "detail", "type": "detail", "label": "Detail", "output_type": "detail", "validation_pose": "detail"},
-                {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
             ]
         else:
             return [
-                {"pose": "front", "type": "catalog", "label": "Front", "output_type": "catalog", "validation_pose": "front"},
-                {"pose": "side_45", "type": "catalog", "label": "Side", "output_type": "catalog", "validation_pose": "side_45"},
-                {"pose": "walking", "type": "lifestyle", "label": "Lifestyle", "output_type": "lifestyle", "validation_pose": None},
+                {"pose": "crop_front", "type": "catalog", "label": "Crop Front", "output_type": "catalog", "validation_pose": "front"},
+                {"pose": "crop_side_45", "type": "catalog", "label": "Crop Side 45", "output_type": "catalog", "validation_pose": "side_45"},
+                {"pose": "crop_back", "type": "catalog", "label": "Crop Back", "output_type": "catalog", "validation_pose": "back"},
+                {"pose": "full_front", "type": "catalog", "label": "Full Front", "output_type": "catalog", "validation_pose": "front"},
+                {"pose": "walking", "type": "lifestyle", "label": "Lifestyle Walking", "output_type": "lifestyle", "validation_pose": None},
                 {"pose": "detail", "type": "detail", "label": "Detail", "output_type": "detail", "validation_pose": "detail"},
-                {"pose": "extra_detail", "type": "detail", "label": "Extra Detail", "output_type": "detail", "validation_pose": "extra_detail"},
-                {"pose": "front", "type": "lifestyle", "label": "Banner", "output_type": "lifestyle", "validation_pose": None},
             ]
     else:  # quantity == 8
         if has_back_image:
@@ -182,8 +182,8 @@ def _build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str,
 def build_catalog_bundle(quantity: int, has_back_image: bool) -> list[dict[str, Any]]:
     tasks = _build_catalog_bundle(quantity, has_back_image)
     focused_labels_by_size = {
-        3: {"Crop"},
-        6: {"Front", "Side", "Back" if has_back_image else "Extra Detail"},
+        3: {"Crop Front"},
+        6: {"Crop Front", "Crop Side 45", "Crop Back"},
         8: {"Front", "Side", "Banner", "Back" if has_back_image else "Product Detail"},
     }
     focused_labels = focused_labels_by_size[len(tasks)]

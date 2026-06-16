@@ -18,8 +18,9 @@ STYLE_COMPATIBILITY_MAPPING = {
 
 POSES = {
     "front": "Front-facing full-body catalog pose. Standing naturally, looking at camera, arms relaxed.",
+    "full_front": "Full-front catalog image. Show the model full-body or three-quarter body so the buyer understands the complete outfit styling, while the product remains the main item.",
     "side_45": "45-degree side catalog pose. Body turned slightly, face visible, full garment visible.",
-    "walking": "Natural walking fashion catalog pose. One foot stepping forward, full garment visible.",
+    "walking": "Natural walking fashion catalog pose with a clean lifestyle background. One foot stepping forward, product clearly visible and prioritized.",
     "back": "Back-facing catalog pose. Show the back of the garment clearly. Use only if product back image exists.",
     "hand_on_hip": "One hand on hip, fashion catalog stance, full garment visible.",
     "sitting": "Sitting on a simple white cube, professional catalog pose, garment clearly visible.",
@@ -28,8 +29,11 @@ POSES = {
 
 FOCUSED_POSES = {
     "front": "Front-facing product-focused crop. Keep the product straight to camera and let the product dominate the frame.",
+    "crop_front": "Front-facing product-focused crop. Keep the product straight to camera and let the product dominate the frame.",
     "side_45": "45-degree product-focused crop. Keep the product visible from the side angle and let the product dominate the frame.",
+    "crop_side_45": "45-degree side product-focused crop. Show product width, silhouette, side seam and fit clearly. Let the product dominate the frame.",
     "back": "Back-facing product-focused crop. Show the back of the product clearly and let the product dominate the frame.",
+    "crop_back": "Back-facing product-focused crop. Show the back construction, waistband/back neckline, pockets, seams, hem and fit clearly. Let the product dominate the frame.",
     "banner_focus": "Product-focused marketplace banner crop. Use a clean composition where the product dominates the frame."
 }
 
@@ -41,16 +45,49 @@ class GPTPromptBuilder:
             return ""
         area = str(garment_json.get("garment_area") or "upper_body").lower().strip()
         if area == "lower_body":
-            framing = "Frame primarily from the waist to the feet. The lower-body product must occupy most of the image."
+            framing = (
+                "Frame primarily from the waist to the shoes. The lower-body product must occupy 75-85% of the image. "
+                "The buyer should immediately understand the waist, pockets, leg width, length, hem and overall fit."
+            )
         elif area == "full_body":
-            framing = "Show the complete full-body garment from neckline to hem. The garment must occupy most of the image."
+            framing = (
+                "Show the complete full-body garment from neckline to hem. The garment must occupy 75-85% of the image. "
+                "The buyer should immediately understand silhouette, length, sleeves/straps, waistline and hem."
+            )
         else:
-            framing = "Frame primarily from the shoulders to the hips. The upper-body product must occupy most of the image."
+            framing = (
+                "Frame primarily from upper chest/shoulders to hips or upper thigh depending on garment length. "
+                "The upper-body product must occupy 75-85% of the image. The buyer should immediately understand neckline, sleeves, fit, hem and details."
+            )
         return (
             "PRODUCT-FOCUSED CAMERA FRAMING:\n"
             f"{framing}\n"
             "Prioritize the product over the model's face and surrounding background.\n"
+            "It is acceptable to crop out part or all of the face when needed to make the product dominant.\n"
             "Keep the complete product visible and do not crop any important product edge or detail."
+        )
+
+    @staticmethod
+    def lifestyle_accessory_block(garment_json: dict[str, Any], pose: str) -> str:
+        if pose.lower().strip() != "walking":
+            return ""
+        area = str(garment_json.get("garment_area") or "upper_body").lower().strip()
+        if area == "lower_body":
+            accessory_examples = "simple sneakers, loafers, school backpack, plain tote bag, or a minimal watch"
+            protection = "Accessories and the top must never cover the waistband, pockets, leg silhouette, hem, or product fabric."
+        elif area == "upper_body":
+            accessory_examples = "simple jeans/trousers, minimal bag, watch, or clean shoes"
+            protection = "Accessories and bottoms must never cover the neckline, sleeves, hem, front design, or product fabric."
+        else:
+            accessory_examples = "simple shoes, small bag, minimal watch, or other subtle ecommerce accessories"
+            protection = "Accessories must never cover the garment silhouette, neckline, waistline, hem, sleeves, or product fabric."
+        return (
+            "LIFESTYLE/WALKING STYLING:\n"
+            "Use a clean real-world ecommerce background such as a minimal studio corner, school corridor, clean street, showroom, or simple interior.\n"
+            f"You may add subtle relevant accessories such as {accessory_examples}.\n"
+            "Accessories must be secondary and must not introduce large logos, text, luxury branding, props, clutter, or a different selling focus.\n"
+            f"{protection}\n"
+            "The product remains the main visual subject."
         )
 
     @staticmethod
@@ -344,6 +381,7 @@ The product itself must remain visually identical to the source.
             f"Style Setting:\n{style_desc}",
             f"Pose Instruction:\n{pose_desc}",
             GPTPromptBuilder.product_focus_block(garment_json, product_focus),
+            GPTPromptBuilder.lifestyle_accessory_block(garment_json, pose),
             GPTPromptBuilder.complementary_styling_block(garment_json),
             area_prompt,
             garment_info
@@ -474,6 +512,10 @@ Do not change the color.
 Pose: {pose_desc}
 Style: {style_desc}
 
+{GPTPromptBuilder.product_focus_block(garment_json, product_focus)}
+
+{GPTPromptBuilder.lifestyle_accessory_block(garment_json, pose)}
+
 The image must look like a real ecommerce product photograph taken with a real camera.
 Natural skin texture.
 Realistic face.
@@ -502,6 +544,8 @@ No fantasy fashion campaign.
             category = "dress"
         elif any(kw in payload for kw in ["shirt", "рубаш", "sơ mi", "t-shirt", "tshirt"]):
             category = "shirt"
+        elif any(kw in payload for kw in ["pants", "trousers", "shorts", "skirt", "брюк", "джин", "шорт", "юбк"]):
+            category = "bottoms"
 
         priorities = []
         if category == "denim":
@@ -512,6 +556,8 @@ No fantasy fashion campaign.
             priorities = ["zipper", "pockets", "stitching", "logo"]
         elif category == "dress":
             priorities = ["fabric texture", "waist details", "embellishments"]
+        elif category == "bottoms":
+            priorities = ["waistband", "front closure", "button", "zipper", "pockets", "side seams", "leg width", "hem", "fabric texture"]
 
         detail_type_lower = detail_type.lower().strip()
         if detail_type_lower == "fabric_detail":
@@ -523,6 +569,18 @@ No fantasy fashion campaign.
 
         if priorities:
             focus_instr += f"\nSpecifically, prioritize showing: {', '.join(priorities)}."
+
+        area = str(garment_json.get("garment_area") or "").lower().strip()
+        if area == "lower_body":
+            focus_instr += (
+                "\nThis is a lower-body product detail shot. Show ONLY details from the pants, jeans, shorts, or skirt. "
+                "Do not show a shirt, blouse, collar, neckline, chest, sleeves, or upper-body garment detail."
+            )
+        elif area == "upper_body":
+            focus_instr += (
+                "\nThis is an upper-body product detail shot. Show ONLY details from the shirt, top, jacket, blouse, hoodie, or sweater. "
+                "Do not show pants, shorts, skirt, shoes, legs, or lower-body garment detail."
+            )
 
         prompt = (
             "Create a professional ecommerce garment detail shot using the uploaded product reference.\n\n"
