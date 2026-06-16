@@ -7,8 +7,10 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 ARG NEXT_PUBLIC_API_URL=/api/v1
 ARG NEXT_PUBLIC_CSRF_COOKIE_NAME=seller_wb_csrf
+ARG INTERNAL_API_URL=http://backend:8000/api/v1
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_CSRF_COOKIE_NAME=$NEXT_PUBLIC_CSRF_COOKIE_NAME
+ENV INTERNAL_API_URL=$INTERNAL_API_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
@@ -18,8 +20,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ARG NEXT_PUBLIC_API_URL=/api/v1
 ARG NEXT_PUBLIC_CSRF_COOKIE_NAME=seller_wb_csrf
+ARG INTERNAL_API_URL=http://backend:8000/api/v1
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_CSRF_COOKIE_NAME=$NEXT_PUBLIC_CSRF_COOKIE_NAME
+ENV INTERNAL_API_URL=$INTERNAL_API_URL
 COPY package.json package-lock.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next

@@ -180,11 +180,13 @@ services:
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/api/v1}
+        - INTERNAL_API_URL=${INTERNAL_API_URL:-http://backend:8000/api/v1}
     restart: unless-stopped
     ports:
       - "3030:3000" # Map frontend to 3030 to avoid conflict with port 3000
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/api/v1}
+      - INTERNAL_API_URL=${INTERNAL_API_URL:-http://backend:8000/api/v1}
 
 volumes:
   postgres_data:

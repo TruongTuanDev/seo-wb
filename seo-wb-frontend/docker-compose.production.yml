@@ -5,10 +5,12 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
         NEXT_PUBLIC_CSRF_COOKIE_NAME: ${NEXT_PUBLIC_CSRF_COOKIE_NAME:-seller_wb_csrf}
+        INTERNAL_API_URL: ${INTERNAL_API_URL:-http://backend:8000/api/v1}
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       NEXT_PUBLIC_CSRF_COOKIE_NAME: ${NEXT_PUBLIC_CSRF_COOKIE_NAME:-seller_wb_csrf}
+      INTERNAL_API_URL: ${INTERNAL_API_URL:-http://backend:8000/api/v1}
 
   nginx:
     image: nginx:1.27-alpine
