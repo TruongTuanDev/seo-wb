@@ -63,6 +63,40 @@ def test_variant_color_signature_replaces_only_color_data():
     assert base["main_color"] == "black"
 
 
+def test_variant_color_signature_can_use_color_only_analysis():
+    image = Image.new("RGB", (120, 180), color=(28, 52, 112))
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG")
+    base = {
+        "product_type": "pants",
+        "garment_area": "lower_body",
+        "main_color": "black",
+        "color_palette": ["#202020"],
+        "material": "textile",
+        "silhouette": "straight",
+        "front_view": {"description": "black straight pants", "key_details": ["black fabric"]},
+    }
+
+    variant = build_variant_color_garment_json(
+        base,
+        buffer.getvalue(),
+        color_analysis={
+            "value": "синий",
+            "english_name": "blue",
+            "dominant_hex": "#1C3470",
+            "palette_hex": ["#1C3470", "#263C7D"],
+            "analysis_mode": "gemini_color_only",
+        },
+    )
+
+    assert variant["main_color"] == "синий"
+    assert variant["color_palette"] == ["#1C3470", "#263C7D"]
+    assert variant["variant_color_signature"]["analysis_mode"] == "gemini_color_only"
+    assert "black" not in variant["front_view"]["description"].lower()
+    assert variant["material"] == "textile"
+    assert variant["silhouette"] == "straight"
+
+
 def test_gpt_prompt_builder():
     garment_json = {
         "product_type": "long_denim_skirt",

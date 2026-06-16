@@ -846,11 +846,17 @@ async def enqueue_gpt_image_openai_job(
         )
         draft.garment_json = garment_json
 
-    from app.services.garment_analyzer import build_variant_color_garment_json
+    from app.services.garment_analyzer import GarmentAnalyzer, build_variant_color_garment_json
+    color_analysis = GarmentAnalyzer(settings).analyze_variant_color(
+        front_bytes,
+        base_garment_json=garment_json,
+        fallback_color=variantColor,
+    )
     garment_json = build_variant_color_garment_json(
         garment_json,
         front_image_bytes=front_bytes,
         variant_color=variantColor,
+        color_analysis=color_analysis,
     )
     analysis_copy = dict(analysis)
     analysis_copy["garment_json"] = _draft_garment_json(draft) or garment_json
@@ -876,8 +882,9 @@ async def enqueue_gpt_image_openai_job(
         "auto_model_generation": auto_model_generation,
         "output_type": "catalog_bundle",
         "quality_check_enabled": enableQualityCheck,
-        "variant_color": variantColor or garment_json.get("main_color") or "",
-        "variant_color_analysis_mode": "fast_local_color_signature",
+        "variant_color": garment_json.get("main_color") or variantColor or "",
+        "variant_color_analysis": color_analysis,
+        "variant_color_analysis_mode": color_analysis.get("analysis_mode") or "fast_local_color_signature",
     }
     metadata["model"] = model or runtime_config["default_image_model"]
 

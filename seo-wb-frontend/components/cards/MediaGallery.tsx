@@ -927,6 +927,32 @@ export function MediaGallery({
                     </div>
                   )}
 
+                  <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-4 space-y-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-sky-950">Variant Color Reference</h3>
+                      <p className="mt-1 text-xs leading-relaxed text-sky-800">
+                        For another color of the same article, upload one real photo of that color here. The system keeps the original garment structure and analyzes only this variant color.
+                      </p>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <ImageInput
+                        label="Variant color image"
+                        file={frontImage}
+                        onChange={(files) => selectFile(files, setFrontImage)}
+                      />
+                      <ImageInput
+                        label="Variant back image (Optional)"
+                        file={backImage}
+                        onChange={(files) => selectFile(files, setBackImage)}
+                      />
+                    </div>
+                    {!frontImage && productReferenceImages[0] && (
+                      <div className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs text-sky-800">
+                        No variant color image selected. The original product photo will be reused.
+                      </div>
+                    )}
+                  </div>
+
                   {/* Shop, system, and one-time upload model sources */}
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-zinc-800">Model Source</label>

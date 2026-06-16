@@ -103,6 +103,18 @@ GARMENT_SCHEMA = {
     ]
 }
 
+VARIANT_COLOR_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "value": {"type": "STRING"},
+        "english_name": {"type": "STRING"},
+        "dominant_hex": {"type": "STRING"},
+        "palette_hex": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "confidence": {"type": "NUMBER"},
+    },
+    "required": ["value", "english_name", "dominant_hex", "palette_hex", "confidence"],
+}
+
 
 def resolve_garment_area(category: str) -> str | None:
     if not category:
@@ -265,6 +277,74 @@ class GarmentAnalyzer:
             category=category,
             gender=gender,
         )
+
+    def analyze_variant_color(
+        self,
+        image_bytes: bytes,
+        *,
+        base_garment_json: dict[str, Any] | None = None,
+        fallback_color: str | None = None,
+    ) -> dict[str, Any]:
+        """Analyze only the color of a same-article variant, not the garment structure."""
+        signature = extract_color_signature(image_bytes, (base_garment_json or {}).get("garment_area"))
+        try:
+            image = self._load_image(image_bytes)
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=[
+                    self._build_variant_color_prompt(base_garment_json, signature.dominant_hex),
+                    image,
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=VARIANT_COLOR_SCHEMA,
+                    temperature=0.05,
+                ),
+            )
+            raw = json.loads(response.text or "{}")
+            value = str(raw.get("value") or "").strip()
+            palette = raw.get("palette_hex") if isinstance(raw.get("palette_hex"), list) else []
+            return {
+                "value": value or str(fallback_color or "").strip() or signature.dominant_name,
+                "english_name": str(raw.get("english_name") or signature.dominant_name).strip(),
+                "dominant_hex": str(raw.get("dominant_hex") or signature.dominant_hex).strip(),
+                "palette_hex": [str(item).strip() for item in palette if str(item).strip()] or signature.palette_hex,
+                "confidence": float(raw.get("confidence") or 0),
+                "analysis_mode": "gemini_color_only",
+            }
+        except Exception as exc:
+            logger.warning("Gemini variant color-only analysis failed; using local signature. error=%s", str(exc)[:300])
+            return {
+                "value": str(fallback_color or "").strip() or signature.dominant_name,
+                "english_name": signature.dominant_name,
+                "dominant_hex": signature.dominant_hex,
+                "palette_hex": signature.palette_hex,
+                "confidence": 0,
+                "analysis_mode": "fast_local_color_signature_fallback",
+            }
+
+    @staticmethod
+    def _build_variant_color_prompt(base_garment_json: dict[str, Any] | None, dominant_hex: str) -> str:
+        product_type = (base_garment_json or {}).get("product_type") or (base_garment_json or {}).get("category") or "fashion product"
+        return f"""
+Analyze ONLY the garment color in the uploaded image. Do not re-identify product structure.
+
+Context:
+- Same article/product family as: {product_type}
+- Local dominant color hint: {dominant_hex}
+
+Return:
+- value: closest Wildberries Russian color name, lowercase if possible, e.g. черный, синий, красный, бежевый.
+- english_name: short English color family.
+- dominant_hex: dominant garment color hex.
+- palette_hex: 1-3 important garment color hex values.
+- confidence: 0..1.
+
+Rules:
+- Ignore background, skin, model, floor, and lighting.
+- Focus on the garment fabric color only.
+- Do not describe silhouette, pockets, gender, size, or category.
+""".strip()
 
     @staticmethod
     def normalize_analysis(
@@ -445,23 +525,30 @@ def build_variant_color_garment_json(
     base_garment_json: dict[str, Any],
     front_image_bytes: bytes,
     variant_color: str | None = None,
+    color_analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Overlay a real variant's color signature without re-analyzing its structure."""
     garment_json = deepcopy(base_garment_json or {})
     signature = extract_color_signature(front_image_bytes, garment_json.get("garment_area"))
-    semantic_color = str(variant_color or "").split(";")[0].strip() or signature.dominant_name
+    semantic_color = (
+        str((color_analysis or {}).get("value") or "").split(";")[0].strip()
+        or str(variant_color or "").split(";")[0].strip()
+        or signature.dominant_name
+    )
+    palette_hex = [str(item).strip() for item in (color_analysis or {}).get("palette_hex", []) if str(item).strip()] or signature.palette_hex
+    dominant_hex = str((color_analysis or {}).get("dominant_hex") or "").strip() or signature.dominant_hex
 
     old_color_terms = _collect_old_color_terms(garment_json)
     garment_json = _replace_old_color_text(garment_json, old_color_terms, semantic_color)
     garment_json["main_color"] = semantic_color
-    garment_json["secondary_color"] = signature.palette_hex[1] if len(signature.palette_hex) > 1 else ""
-    garment_json["secondary_colors"] = signature.palette_hex[1:]
-    garment_json["color_palette"] = signature.palette_hex
+    garment_json["secondary_color"] = palette_hex[1] if len(palette_hex) > 1 else ""
+    garment_json["secondary_colors"] = palette_hex[1:]
+    garment_json["color_palette"] = palette_hex
     garment_json["variant_color_signature"] = {
-        "dominant_hex": signature.dominant_hex,
-        "dominant_name": signature.dominant_name,
-        "palette_hex": signature.palette_hex,
-        "analysis_mode": "fast_local_color_signature",
+        "dominant_hex": dominant_hex,
+        "dominant_name": (color_analysis or {}).get("english_name") or signature.dominant_name,
+        "palette_hex": palette_hex,
+        "analysis_mode": (color_analysis or {}).get("analysis_mode") or "fast_local_color_signature",
     }
     return garment_json
 
