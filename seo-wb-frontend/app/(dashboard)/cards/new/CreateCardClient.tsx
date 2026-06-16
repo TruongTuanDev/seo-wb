@@ -773,6 +773,7 @@ export function CreateCardClient() {
     input: {
       frontImage: File;
       backImage?: File;
+      variantColorImage?: File;
       modelImage?: File;
       modelId?: string;
       selectedModelImageUrl?: string;
@@ -817,6 +818,9 @@ export function CreateCardClient() {
       formData.append("productFrontImage", input.frontImage);
       if (input.backImage) {
         formData.append("productBackImage", input.backImage);
+      }
+      if (input.variantColorImage) {
+        formData.append("variantColorImage", input.variantColorImage);
       }
       if (input.imageModel) {
         formData.append("model", input.imageModel);

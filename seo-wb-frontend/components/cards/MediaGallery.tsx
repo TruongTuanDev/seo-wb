@@ -212,6 +212,7 @@ interface MediaGalleryProps {
   onGenerateImages: (input: {
     frontImage: File;
     backImage?: File;
+    variantColorImage?: File;
     modelImage?: File;
     modelId?: string;
     selectedModelImageUrl?: string;
@@ -277,8 +278,11 @@ export function MediaGallery({
   const [isAnalyzingGarment, setIsAnalyzingGarment] = useState(false);
   const [showJsonPreview, setShowJsonPreview] = useState(false);
   const [imageActionLoading, setImageActionLoading] = useState<string | null>(null);
-  const effectiveFrontImage = frontImage || productReferenceImages[0] || null;
-  const effectiveBackImage = backImage || productReferenceImages[1] || null;
+  const baseFrontImage = productReferenceImages[0] || frontImage || null;
+  const baseBackImage = productReferenceImages[1] || null;
+  const effectiveFrontImage = baseFrontImage;
+  const effectiveBackImage = baseBackImage;
+  const variantColorImage = frontImage || null;
 
   useEffect(() => {
     let cancelled = false;
@@ -552,7 +556,8 @@ export function MediaGallery({
       }
       onGenerateImages({
         frontImage: effectiveFrontImage,
-        backImage: effectiveBackImage || undefined,
+        backImage: baseBackImage || undefined,
+        variantColorImage: variantColorImage || undefined,
         modelImage: customModelImage,
         modelId: "none",
         backgroundStyle,
@@ -579,7 +584,8 @@ export function MediaGallery({
       }
       onGenerateImages({
         frontImage: effectiveFrontImage,
-        backImage: effectiveBackImage || undefined,
+        backImage: baseBackImage || undefined,
+        variantColorImage: variantColorImage || undefined,
         modelId: selectedModelId,
         selectedModelImageUrl: chosenModel.frontImageUrl,
         selectedModelGender: chosenModel.gender,
@@ -934,16 +940,11 @@ export function MediaGallery({
                         For another color of the same article, upload one real photo of that color here. The system keeps the original garment structure and analyzes only this variant color.
                       </p>
                     </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid gap-4 sm:grid-cols-1">
                       <ImageInput
                         label="Variant color image"
                         file={frontImage}
                         onChange={(files) => selectFile(files, setFrontImage)}
-                      />
-                      <ImageInput
-                        label="Variant back image (Optional)"
-                        file={backImage}
-                        onChange={(files) => selectFile(files, setBackImage)}
                       />
                     </div>
                     {!frontImage && productReferenceImages[0] && (
@@ -1084,16 +1085,16 @@ export function MediaGallery({
                     <div className="font-semibold text-zinc-900">Pose Bundle Preview</div>
                     <div className="mt-1 leading-relaxed">
                       {quantity === 3 && "Front, Lifestyle, Detail"}
-                      {quantity === 6 && (backImage 
+                      {quantity === 6 && (baseBackImage
                         ? "Front, Side, Back, Lifestyle, Detail, Banner"
                         : "Front, Side, Lifestyle, Detail, Extra Detail, Banner")}
-                      {quantity === 8 && (backImage
+                      {quantity === 8 && (baseBackImage
                         ? "Front, Side, Back, Walking, Hand On Hip, Sitting, Fabric Detail, Banner"
                         : "Front, Side, Walking, Hand On Hip, Sitting, Fabric Detail, Product Detail, Banner")}
                     </div>
                     <div className="mt-2 text-[11px] text-zinc-500">
                       Back view is generated only when a back product image is uploaded.
-                      {!backImage && quantity > 3 && (
+                      {!baseBackImage && quantity > 3 && (
                         <span className="block mt-0.5 text-amber-600 font-medium">
                           Note: Back view will be replaced by {quantity === 6 ? "Extra Detail" : "Product Detail"} shot.
                         </span>

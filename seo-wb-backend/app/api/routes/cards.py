@@ -776,6 +776,7 @@ async def enqueue_gpt_image_openai_job(
     quantity: int = Form(...),
     productFrontImage: UploadFile = File(...),
     productBackImage: UploadFile | None = File(default=None),
+    variantColorImage: UploadFile | None = File(default=None),
     modelImage: UploadFile | None = File(default=None),
     autoGenerateModel: bool = Form(default=False),
     model: str | None = Form(default=None),
@@ -806,11 +807,18 @@ async def enqueue_gpt_image_openai_job(
     _validate_image_upload(productFrontImage)
     if productBackImage:
         _validate_image_upload(productBackImage)
+    if variantColorImage:
+        _validate_image_upload(variantColorImage)
     if modelImage:
         _validate_image_upload(modelImage)
 
     front_bytes = await _read_upload_limited(productFrontImage, settings.max_upload_image_bytes, "image_too_large")
     back_bytes = await _read_upload_limited(productBackImage, settings.max_upload_image_bytes, "image_too_large") if productBackImage else None
+    variant_color_bytes = (
+        await _read_upload_limited(variantColorImage, settings.max_upload_image_bytes, "image_too_large")
+        if variantColorImage
+        else front_bytes
+    )
 
     # Resolve model reference image server-side so a shop cannot use another shop's model URL.
     model_bytes = None
@@ -848,13 +856,13 @@ async def enqueue_gpt_image_openai_job(
 
     from app.services.garment_analyzer import GarmentAnalyzer, build_variant_color_garment_json
     color_analysis = GarmentAnalyzer(settings).analyze_variant_color(
-        front_bytes,
+        variant_color_bytes,
         base_garment_json=garment_json,
         fallback_color=variantColor,
     )
     garment_json = build_variant_color_garment_json(
         garment_json,
-        front_image_bytes=front_bytes,
+        front_image_bytes=variant_color_bytes,
         variant_color=variantColor,
         color_analysis=color_analysis,
     )
@@ -885,6 +893,7 @@ async def enqueue_gpt_image_openai_job(
         "variant_color": garment_json.get("main_color") or variantColor or "",
         "variant_color_analysis": color_analysis,
         "variant_color_analysis_mode": color_analysis.get("analysis_mode") or "fast_local_color_signature",
+        "variant_color_reference_uploaded": bool(variantColorImage),
     }
     metadata["model"] = model or runtime_config["default_image_model"]
 

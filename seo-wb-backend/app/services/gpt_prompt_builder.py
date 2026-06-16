@@ -202,6 +202,13 @@ class GPTPromptBuilder:
     ) -> str:
         reasons_text = "\n".join(f"- {reason}" for reason in failed_reasons if reason) or "- fidelity mismatch"
         details_text = "\n".join(f"- {detail}" for detail in critical_details if detail) or "- exact color, wash, seams, logos and embellishments"
+        variant_color_signature = garment_json.get("variant_color_signature") or {}
+        is_variant_color = bool(variant_color_signature)
+        color_rule = (
+            f"Recolor only the target garment to the requested variant color: {garment_json.get('main_color') or 'target variant color'}."
+            if is_variant_color
+            else "Do not recolor the garment."
+        )
         prompt = f"""
 STRICT PRODUCT PRESERVATION MODE.
 
@@ -217,11 +224,11 @@ Do not simplify the garment.
 Do not remove rhinestones.
 Do not remove ripped or distressed patches.
 Do not change the denim wash.
-Do not recolor the garment.
+{color_rule}
 Do not turn embellished denim into plain denim.
 
 Only change pose, model placement, camera angle, or background.
-The product itself must remain visually identical to the source.
+The product itself must remain visually identical to the source{" except for the requested variant color" if is_variant_color else ""}.
 """
         return GPTPromptBuilder.clean_cinematic_wording(prompt.strip())
 
@@ -299,11 +306,33 @@ The product itself must remain visually identical to the source.
             "No fantasy fashion campaign."
         )
 
+        color_palette = garment_json.get("color_palette") or []
+        special_details = garment_json.get("special_details") or []
+        variant_color_signature = garment_json.get("variant_color_signature") or {}
+        is_variant_color = bool(variant_color_signature)
+        variant_palette = variant_color_signature.get("palette_hex") or color_palette
+        variant_hex = variant_color_signature.get("dominant_hex") or ""
+        secondary_color = garment_json.get("secondary_color") or ""
+        variant_name = garment_json.get("main_color") or variant_color_signature.get("dominant_name") or "target variant color"
+        variant_color_prompt = ""
+        if is_variant_color:
+            variant_color_prompt = (
+                "VARIANT COLOR OVERRIDE:\n"
+                f"- Final target garment color: {variant_name}.\n"
+                f"- Target color hex/palette: {variant_hex or 'n/a'}"
+                f"{', ' + ', '.join(variant_palette) if variant_palette else ''}.\n"
+                "- Use the uploaded product reference images ONLY for product structure: category, silhouette, length, waist, pockets, seams, closure, fabric texture and details.\n"
+                "- It is REQUIRED to recolor only the target garment from the structural reference color to the target variant color.\n"
+                "- Do not recolor the model, skin, shoes, background, or complementary clothing.\n"
+                "- Do not copy logos, drawstrings, short length, pockets, silhouette, or category from any color-reference image.\n"
+                "- The same article must be shown; only the product color changes."
+            )
+
         # Garment Rules (Requirement 7)
         garment_rules_prompt = (
             "Garment Rules:\n"
             "- preserve garment category\n"
-            "- preserve color\n"
+            f"{'- preserve the target variant color' if is_variant_color else '- preserve color'}\n"
             "- preserve length\n"
             "- preserve texture\n"
             "- preserve pockets\n"
@@ -312,22 +341,29 @@ The product itself must remain visually identical to the source.
             "- do not invent logos\n"
             "- do not change garment area"
         )
-        color_palette = garment_json.get("color_palette") or []
-        special_details = garment_json.get("special_details") or []
-        secondary_color = garment_json.get("secondary_color") or ""
-        color_lock_prompt = (
-            "COLOR LOCK:\n"
-            "The garment color must remain identical to the reference product.\n"
-            "Do not recolor the garment.\n"
-            "Do not change denim wash.\n"
-            "Do not create grey denim.\n"
-            "Do not create darker denim.\n"
-            "Do not create lighter denim.\n"
-            "Do not modify distressing.\n"
-            "Do not modify rhinestone placement.\n"
-            "Keep the exact same color, wash pattern, distressing pattern, stitching, pockets, seams, logos and embellishments.\n"
-            "The generated garment must represent the same physical product."
-        )
+        if is_variant_color:
+            color_lock_prompt = (
+                "COLOR LOCK:\n"
+                "The generated garment color must match the target variant color, not the old structural reference color.\n"
+                "Recolor only the product garment to the target variant color.\n"
+                "After applying the target variant color, do not make it darker, lighter, grey, black, or navy unless that is the target variant.\n"
+                "Keep wash pattern, distressing pattern, stitching, pockets, seams, logos and embellishments from the original article.\n"
+                "The generated garment must represent the same physical product in a different color."
+            )
+        else:
+            color_lock_prompt = (
+                "COLOR LOCK:\n"
+                "The garment color must remain identical to the reference product.\n"
+                "Do not recolor the garment.\n"
+                "Do not change denim wash.\n"
+                "Do not create grey denim.\n"
+                "Do not create darker denim.\n"
+                "Do not create lighter denim.\n"
+                "Do not modify distressing.\n"
+                "Do not modify rhinestone placement.\n"
+                "Keep the exact same color, wash pattern, distressing pattern, stitching, pockets, seams, logos and embellishments.\n"
+                "The generated garment must represent the same physical product."
+            )
         if color_palette:
             color_lock_prompt += f"\nReference color palette: {', '.join(color_palette)}."
         if secondary_color:
@@ -421,6 +457,7 @@ The product itself must remain visually identical to the source.
             base_prompt,
             article_context_block,
             model_profile_block,
+            variant_color_prompt,
             garment_rules_prompt,
             color_lock_prompt,
             f"Style Setting:\n{style_desc}",
@@ -439,9 +476,9 @@ The product itself must remain visually identical to the source.
                 f"CRITICAL GARMENT FIDELITY MODE\n"
                 f"Do not redesign the garment.\n"
                 f"This is a product photography task, not a fashion redesign task.\n"
-                f"The generated garment must be visually identical to the source garment.\n"
+                f"The generated garment must be visually identical to the source garment{' except for the requested variant color' if is_variant_color else ''}.\n"
                 f"Only change: model pose, background, camera angle, and complementary non-product clothing when explicitly allowed.\n"
-                f"Do not change the garment itself.\n"
+                f"Do not change the garment itself{' except recoloring the target garment to the variant color' if is_variant_color else ''}.\n"
                 f"STRICT GARMENT PRESERVATION MODE!\n"
                 f"WARNING: The previous generation failed validation on the following fields: {failed_fields_str}.\n"
                 f"You must pay extreme attention to these fields and ensure they exactly match the uploaded garment reference images and garment specifications."
@@ -485,6 +522,20 @@ The product itself must remain visually identical to the source.
         pockets = garment_json.get("pockets") or "original"
         color_palette = garment_json.get("color_palette") or []
         special_details = garment_json.get("special_details") or []
+        variant_color_signature = garment_json.get("variant_color_signature") or {}
+        is_variant_color = bool(variant_color_signature)
+        variant_palette = variant_color_signature.get("palette_hex") or color_palette
+        variant_hex = variant_color_signature.get("dominant_hex") or ""
+        variant_color_instruction = ""
+        if is_variant_color:
+            variant_color_instruction = (
+                "VARIANT COLOR OVERRIDE:\n"
+                f"The final target product color is {main_color}.\n"
+                f"Target color hex/palette: {variant_hex or 'n/a'}"
+                f"{', ' + ', '.join(variant_palette) if variant_palette else ''}.\n"
+                "Use the product reference image for structure only and recolor only the target garment to this variant color.\n"
+                "Do not copy logos, drawstrings, short length, silhouette or category from any separate color-reference image.\n"
+            )
         
         garment_area = garment_json.get("garment_area") or "upper_body"
         if garment_area == "lower_body":
@@ -519,18 +570,26 @@ The product itself must remain visually identical to the source.
                 "Use image 1 as the exact model reference for identity, face and body proportions. "
                 "Do not copy the original stance; instead follow the requested pose and framing for this slot."
             )
-            product_ref_inst = "Use image 2 as the exact product reference."
+            product_ref_inst = (
+                "Use image 2 as the exact product structure reference; apply the target variant color from garment_json."
+                if is_variant_color
+                else "Use image 2 as the exact product reference."
+            )
         else:
             model_ref_inst = ""
-            product_ref_inst = "Use image 1 as the exact product reference."
+            product_ref_inst = (
+                "Use image 1 as the exact product structure reference; apply the target variant color from garment_json."
+                if is_variant_color
+                else "Use image 1 as the exact product reference."
+            )
 
         prompt = f"""
 CRITICAL GARMENT FIDELITY MODE
 Do not redesign the garment.
 This is a product photography task, not a fashion redesign task.
-The generated garment must be visually identical to the source garment.
+The generated garment must be visually identical to the source garment{" except for the requested variant color" if is_variant_color else ""}.
 Only change: model pose, background, camera angle, and complementary non-product clothing when explicitly allowed.
-Do not change the garment itself.
+Do not change the garment itself{" except recoloring the target garment to the variant color" if is_variant_color else ""}.
 
 {model_ref_inst}
 
@@ -540,6 +599,8 @@ Do not change the garment itself.
 
 {article_context_block}
 
+{variant_color_instruction}
+
 The product is a {product_desc}.
 {area_instruction}
 
@@ -547,7 +608,7 @@ The {product_type} must start at the correct position and extend to {length} len
 Preserve {fabric_texture} texture, {main_color} color, {secondary_color}, {closure} closure, pockets, seams and {silhouette} silhouette.
 Reference color palette: {", ".join(color_palette) if color_palette else "match the source product colors exactly"}.
 Special details that must stay identical: {", ".join(special_details) if special_details else "all visible distressing, embellishments, logos and wash effects"}.
-Do not recolor the garment.
+{"Recolor only the target garment to the variant color. Do not keep the old reference color if it differs from the target variant." if is_variant_color else "Do not recolor the garment."}
 Do not change denim wash.
 Do not create darker or lighter denim.
 Do not move rhinestones, embroidery, logos, pockets or seams.
@@ -555,7 +616,7 @@ Do not move rhinestones, embroidery, logos, pockets or seams.
 {complement_rule}
 {conversion_avoid}
 Do not shorten the {product_type}.
-Do not change the color.
+{"Do not change away from the target variant color." if is_variant_color else "Do not change the color."}
 
 Pose: {pose_desc}
 Style: {style_desc}
@@ -619,6 +680,18 @@ No fantasy fashion campaign.
             focus_instr += f"\nSpecifically, prioritize showing: {', '.join(priorities)}."
 
         area = str(garment_json.get("garment_area") or "").lower().strip()
+        variant_color_signature = garment_json.get("variant_color_signature") or {}
+        is_variant_color = bool(variant_color_signature)
+        variant_hex = variant_color_signature.get("dominant_hex") or ""
+        variant_palette = variant_color_signature.get("palette_hex") or garment_json.get("color_palette") or []
+        variant_color_prompt = ""
+        if is_variant_color:
+            variant_color_prompt = (
+                f"\nVariant color override: create the same product detail in {garment_json.get('main_color') or 'the target variant color'} "
+                f"({variant_hex or 'n/a'}{', ' + ', '.join(variant_palette) if variant_palette else ''}). "
+                "Use the uploaded product reference only for structure and detail placement. "
+                "Do not copy any logo, drawstring, short length, category or design from a color-reference image."
+            )
         if area == "lower_body":
             focus_instr += (
                 "\nThis is a lower-body product detail shot. Show ONLY details from the pants, jeans, shorts, or skirt. "
@@ -634,7 +707,8 @@ No fantasy fashion campaign.
             "Create a professional ecommerce garment detail shot using the uploaded product reference.\n\n"
             f"{focus_instr}\n\n"
             "Focus tightly on the product. The image must show ONLY the garment itself, laid flat or as a close-up, with NO model, NO human body, NO head, hands, or limbs visible.\n\n"
-            "Preserve exact product color, fabric texture, logo/text, seams, pockets and closures.\n\n"
+            f"{variant_color_prompt}\n\n"
+            f"{'Preserve exact variant product color' if is_variant_color else 'Preserve exact product color'}, fabric texture, logo/text, seams, pockets and closures.\n\n"
             "Clean studio background.\n\n"
             "Do not change the product design.\n\n"
             "Do not invent new text or logos.\n\n"

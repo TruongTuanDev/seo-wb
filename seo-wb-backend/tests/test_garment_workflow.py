@@ -97,6 +97,38 @@ def test_variant_color_signature_can_use_color_only_analysis():
     assert variant["silhouette"] == "straight"
 
 
+def test_variant_color_prompt_overrides_reference_color_without_copying_reference_structure():
+    garment_json = {
+        "product_type": "pants",
+        "garment_area": "lower_body",
+        "category": "pants",
+        "gender": "male",
+        "main_color": "ÑÐ¸Ð½Ð¸Ð¹",
+        "secondary_color": "",
+        "color_palette": ["#1C3470"],
+        "material": "textile",
+        "fabric_texture": "smooth",
+        "silhouette": "straight",
+        "length": "full length",
+        "closure": "button and zipper",
+        "pockets": "side pockets",
+        "variant_color_signature": {
+            "dominant_hex": "#1C3470",
+            "dominant_name": "blue",
+            "palette_hex": ["#1C3470"],
+            "analysis_mode": "gemini_color_only",
+        },
+    }
+
+    prompt = GPTPromptBuilder.build_prompt(garment_json, "studio", "front")
+
+    assert "VARIANT COLOR OVERRIDE" in prompt
+    assert "It is REQUIRED to recolor only the target garment" in prompt
+    assert "Do not recolor the garment." not in prompt
+    assert "Do not copy logos, drawstrings, short length, pockets, silhouette, or category" in prompt
+    assert "#1C3470" in prompt
+
+
 def test_gpt_prompt_builder():
     garment_json = {
         "product_type": "long_denim_skirt",
