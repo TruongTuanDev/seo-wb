@@ -1,12 +1,14 @@
 import asyncio
 import logging
 import os
+from io import BytesIO
 from pathlib import Path
 from time import monotonic
 from typing import Any, Callable
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
+from PIL import Image, ImageOps
 
 from app.core.config import Settings
 from app.core.errors import AppError
@@ -111,6 +113,73 @@ def _build_validation_summary(images: list[dict[str, Any]]) -> dict[str, Any]:
         "review_required_count": counts["review_required"],
         "failed_count": counts["failed"],
     }
+
+
+def _normalized_focus_crop_box(garment_area: str, pose: str) -> tuple[float, float, float, float] | None:
+    area = str(garment_area or "").strip().lower()
+    pose_key = str(pose or "").strip().lower()
+    if not pose_key.startswith("crop_"):
+        return None
+
+    # Hard framing for focused catalog slots so they do not collapse back into full-body shots.
+    if area == "lower_body":
+        boxes = {
+            "crop_front": (0.18, 0.28, 0.82, 0.98),
+            "crop_side_45": (0.22, 0.28, 0.88, 0.98),
+            "crop_back": (0.16, 0.26, 0.84, 0.98),
+        }
+        return boxes.get(pose_key, (0.18, 0.28, 0.82, 0.98))
+    if area == "upper_body":
+        boxes = {
+            "crop_front": (0.15, 0.12, 0.85, 0.82),
+            "crop_side_45": (0.20, 0.12, 0.88, 0.84),
+            "crop_back": (0.16, 0.12, 0.84, 0.84),
+        }
+        return boxes.get(pose_key, (0.15, 0.12, 0.85, 0.82))
+    if area == "full_body":
+        boxes = {
+            "crop_front": (0.14, 0.08, 0.86, 0.95),
+            "crop_side_45": (0.18, 0.08, 0.88, 0.95),
+            "crop_back": (0.14, 0.08, 0.86, 0.95),
+        }
+        return boxes.get(pose_key, (0.14, 0.08, 0.86, 0.95))
+    return None
+
+
+def apply_product_focus_crop(
+    image_bytes: bytes,
+    garment_json: dict[str, Any],
+    pose: str,
+    product_focus: bool,
+) -> bytes:
+    if not product_focus:
+        return image_bytes
+
+    crop_box = _normalized_focus_crop_box(
+        str(garment_json.get("garment_area") or "").strip().lower(),
+        pose,
+    )
+    if crop_box is None:
+        return image_bytes
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as opened:
+            image = ImageOps.exif_transpose(opened).convert("RGB")
+            width, height = image.size
+            left = int(width * crop_box[0])
+            top = int(height * crop_box[1])
+            right = int(width * crop_box[2])
+            bottom = int(height * crop_box[3])
+            if right - left < max(8, width // 5) or bottom - top < max(8, height // 5):
+                return image_bytes
+
+            cropped = image.crop((left, top, right, bottom)).resize((width, height), Image.Resampling.LANCZOS)
+            buffer = BytesIO()
+            cropped.save(buffer, format="JPEG", quality=90, optimize=True)
+            return buffer.getvalue()
+    except Exception:
+        logger.exception("Failed to apply product focus crop pose=%s", pose)
+        return image_bytes
 
 
 def file_to_data_uri(path: Path) -> str:
@@ -474,6 +543,12 @@ class GPTImageCatalogService:
                         job_model,
                         int(runtime_config.get("max_retry", self._settings.openai_image_retry_attempts)),
                     )
+                    image_bytes = apply_product_focus_crop(
+                        image_bytes,
+                        garment_json,
+                        pose,
+                        bool(task.get("product_focus")),
+                    )
 
                     # Validate image
                     try:
@@ -645,6 +720,12 @@ class GPTImageCatalogService:
                         retry_prompt,
                         job_model,
                         int(runtime_config.get("max_retry", self._settings.openai_image_retry_attempts)),
+                    )
+                    retry_image_bytes = apply_product_focus_crop(
+                        retry_image_bytes,
+                        garment_json,
+                        pose,
+                        bool(task.get("product_focus")),
                     )
 
                     try:

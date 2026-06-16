@@ -49,19 +49,30 @@ class GPTPromptBuilder:
                 "Frame primarily from the waist to the shoes. The lower-body product must occupy 75-85% of the image. "
                 "The buyer should immediately understand the waist, pockets, leg width, length, hem and overall fit."
             )
+            crop_rule = (
+                "Do not deliver a full-body portrait for this slot. Crop out most or all of the face and most of the upper torso. "
+                "Keep the waistband near the upper part of the frame and the shoes or hem near the lower part of the frame."
+            )
         elif area == "full_body":
             framing = (
                 "Show the complete full-body garment from neckline to hem. The garment must occupy 75-85% of the image. "
                 "The buyer should immediately understand silhouette, length, sleeves/straps, waistline and hem."
+            )
+            crop_rule = (
+                "Do not leave excessive empty background around the model. The garment itself must dominate the frame."
             )
         else:
             framing = (
                 "Frame primarily from upper chest/shoulders to hips or upper thigh depending on garment length. "
                 "The upper-body product must occupy 75-85% of the image. The buyer should immediately understand neckline, sleeves, fit, hem and details."
             )
+            crop_rule = (
+                "Do not deliver a distant full-body portrait for this slot. Crop out most or all of the legs when needed so the upper-body product dominates."
+            )
         return (
             "PRODUCT-FOCUSED CAMERA FRAMING:\n"
             f"{framing}\n"
+            f"{crop_rule}\n"
             "Prioritize the product over the model's face and surrounding background.\n"
             "It is acceptable to crop out part or all of the face when needed to make the product dominant.\n"
             "Keep the complete product visible and do not crop any important product edge or detail."

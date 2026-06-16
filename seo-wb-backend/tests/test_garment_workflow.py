@@ -4,7 +4,7 @@ from app.services.color_fidelity import compare_color_signatures, extract_color_
 from app.services.garment_analyzer import _is_complex_product
 from app.services.gpt_prompt_builder import GPTPromptBuilder
 from app.services.garment_validator import GarmentValidator
-from app.services.gpt_image_catalog import GPTImageCatalogService
+from app.services.gpt_image_catalog import GPTImageCatalogService, apply_product_focus_crop
 from app.core.config import Settings
 from PIL import Image
 from io import BytesIO
@@ -237,6 +237,48 @@ def test_build_tasks_quantity_rules():
     # Unsupported quantity fallback
     tasks_fallback = GPTImageCatalogService.build_tasks(5, has_back_image=True)
     assert len(tasks_fallback) == 6
+
+
+def test_apply_product_focus_crop_zooms_lower_body_product():
+    image = Image.new("RGB", (200, 300), color=(245, 245, 245))
+    for y in range(90, 300):
+        for x in range(50, 150):
+            image.putpixel((x, y), (25, 25, 25))
+
+    original_buffer = BytesIO()
+    image.save(original_buffer, format="JPEG")
+    original_bytes = original_buffer.getvalue()
+
+    cropped_bytes = apply_product_focus_crop(
+        original_bytes,
+        {"garment_area": "lower_body"},
+        "crop_front",
+        True,
+    )
+
+    original_image = Image.open(BytesIO(original_bytes)).convert("L")
+    cropped_image = Image.open(BytesIO(cropped_bytes)).convert("L")
+
+    # After enforced crop, the upper part of the image should contain more of the dark product area.
+    original_top_band = sum(original_image.crop((0, 0, 200, 80)).getdata()) / (200 * 80)
+    cropped_top_band = sum(cropped_image.crop((0, 0, 200, 80)).getdata()) / (200 * 80)
+    assert cropped_top_band < original_top_band
+
+
+def test_apply_product_focus_crop_skips_non_crop_slots():
+    image = Image.new("RGB", (120, 180), color=(120, 120, 120))
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG")
+    source_bytes = buffer.getvalue()
+
+    result_bytes = apply_product_focus_crop(
+        source_bytes,
+        {"garment_area": "lower_body"},
+        "full_front",
+        False,
+    )
+
+    assert result_bytes == source_bytes
 
 def test_detail_validation_bypasses_pose():
     from app.core.config import Settings
