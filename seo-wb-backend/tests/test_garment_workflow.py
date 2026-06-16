@@ -128,6 +128,38 @@ def test_gpt_prompt_builder():
     assert "waist-to-shoes product-focused crop" in front_crop_prompt
     assert "waistband fully visible near the top of frame" in front_crop_prompt
 
+    upper_prompt = GPTPromptBuilder.build_prompt(
+        {
+            "product_type": "shirt",
+            "garment_area": "upper_body",
+            "category": "shirt",
+            "main_color": "white",
+            "material": "cotton",
+        },
+        "studio",
+        "crop_side_45",
+        product_focus=True,
+    )
+    assert "45-degree upper-body product crop" in upper_prompt
+    assert "neckline, collar, shoulders, sleeves" in upper_prompt
+    assert "waist-to-shoes" not in upper_prompt
+
+    full_body_prompt = GPTPromptBuilder.build_prompt(
+        {
+            "product_type": "dress",
+            "garment_area": "full_body",
+            "category": "dress",
+            "main_color": "black",
+            "material": "textile",
+        },
+        "studio",
+        "crop_back",
+        product_focus=True,
+    )
+    assert "Back-facing full-garment product image" in full_body_prompt
+    assert "complete outfit shape" in full_body_prompt
+    assert "waist-to-shoes" not in full_body_prompt
+
     lifestyle_prompt = GPTPromptBuilder.build_prompt(garment_json, "studio", "walking")
     assert "LIFESTYLE/WALKING STYLING" in lifestyle_prompt
     assert "subtle relevant accessories" in lifestyle_prompt
@@ -290,6 +322,35 @@ def test_apply_product_focus_crop_skips_non_crop_slots():
     )
 
     assert result_bytes == source_bytes
+
+
+def test_apply_product_focus_crop_handles_upper_and_full_body():
+    image = Image.new("RGB", (240, 360), color=(245, 245, 245))
+    for y in range(35, 250):
+        for x in range(55, 185):
+            image.putpixel((x, y), (30, 30, 30))
+
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG")
+    source_bytes = buffer.getvalue()
+
+    upper_bytes = apply_product_focus_crop(
+        source_bytes,
+        {"garment_area": "upper_body"},
+        "crop_front",
+        True,
+    )
+    full_bytes = apply_product_focus_crop(
+        source_bytes,
+        {"garment_area": "full_body"},
+        "crop_side_45",
+        True,
+    )
+
+    assert upper_bytes != source_bytes
+    assert full_bytes != source_bytes
+    assert Image.open(BytesIO(upper_bytes)).size == (240, 360)
+    assert Image.open(BytesIO(full_bytes)).size == (240, 360)
 
 def test_detail_validation_bypasses_pose():
     from app.core.config import Settings

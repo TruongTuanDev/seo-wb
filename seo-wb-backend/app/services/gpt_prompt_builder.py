@@ -40,6 +40,37 @@ FOCUSED_POSES = {
 
 class GPTPromptBuilder:
     @staticmethod
+    def focused_pose_description(garment_json: dict[str, Any], pose: str) -> str:
+        pose_key = pose.lower().strip()
+        area = str(garment_json.get("garment_area") or "upper_body").lower().strip()
+
+        if area == "upper_body":
+            descriptions = {
+                "front": "Front-facing upper-body product crop. Show neckline, shoulders, sleeves, chest/body fit, front design and hem clearly. Crop around upper chest/shoulders to hips or upper thigh so the top dominates.",
+                "crop_front": "Front-facing upper-body product crop. Show neckline, shoulders, sleeves, chest/body fit, front design and hem clearly. Crop around upper chest/shoulders to hips or upper thigh so the top dominates.",
+                "side_45": "45-degree upper-body product crop. Rotate the torso to reveal sleeve shape, side seam, fabric fall, hem and thickness while keeping the top dominant.",
+                "crop_side_45": "45-degree upper-body product crop. Rotate the torso to reveal sleeve shape, side seam, fabric fall, hem and thickness while keeping the top dominant.",
+                "back": "Back-facing upper-body product crop. Show collar/back neckline, shoulder line, back panel, sleeves, back hem and any rear details clearly.",
+                "crop_back": "Back-facing upper-body product crop. Show collar/back neckline, shoulder line, back panel, sleeves, back hem and any rear details clearly.",
+                "banner_focus": "Upper-body product banner crop. Keep the top as the main subject with clean marketplace composition and no lower-body distraction.",
+            }
+            return descriptions.get(pose_key, descriptions["front"])
+
+        if area == "full_body":
+            descriptions = {
+                "front": "Front-facing full-garment product image. Keep the entire outfit visible from neckline/shoulders to hem, with the garment filling the frame and minimal empty background.",
+                "crop_front": "Front-facing full-garment product image. Keep the entire outfit visible from neckline/shoulders to hem, with the garment filling the frame and minimal empty background.",
+                "side_45": "45-degree full-garment product image. Show side silhouette, waistline, garment length, sleeves/straps, hem movement and complete outfit shape.",
+                "crop_side_45": "45-degree full-garment product image. Show side silhouette, waistline, garment length, sleeves/straps, hem movement and complete outfit shape.",
+                "back": "Back-facing full-garment product image. Show rear neckline, back panel, waistline, length, hem and complete outfit shape without converting the garment.",
+                "crop_back": "Back-facing full-garment product image. Show rear neckline, back panel, waistline, length, hem and complete outfit shape without converting the garment.",
+                "banner_focus": "Full-garment marketplace banner. Keep the complete outfit visible and dominant, using a clean composition with enough space for marketplace cropping.",
+            }
+            return descriptions.get(pose_key, descriptions["front"])
+
+        return FOCUSED_POSES.get(pose_key, FOCUSED_POSES["front"])
+
+    @staticmethod
     def product_focus_block(garment_json: dict[str, Any], product_focus: bool) -> str:
         if not product_focus:
             return ""
@@ -55,19 +86,20 @@ class GPTPromptBuilder:
             )
         elif area == "full_body":
             framing = (
-                "Show the complete full-body garment from neckline to hem. The garment must occupy 75-85% of the image. "
-                "The buyer should immediately understand silhouette, length, sleeves/straps, waistline and hem."
+                "Show the complete full-body garment from neckline/shoulders to hem. The garment must occupy 75-85% of the image. "
+                "The buyer should immediately understand neckline, sleeves/straps, waistline, silhouette, length, movement and hem."
             )
             crop_rule = (
-                "Do not leave excessive empty background around the model. The garment itself must dominate the frame."
+                "Do not turn this into a distant full-body portrait. Keep the entire outfit visible, but remove excessive empty space around the model."
             )
         else:
             framing = (
                 "Frame primarily from upper chest/shoulders to hips or upper thigh depending on garment length. "
-                "The upper-body product must occupy 75-85% of the image. The buyer should immediately understand neckline, sleeves, fit, hem and details."
+                "The upper-body product must occupy 75-85% of the image. The buyer should immediately understand neckline, collar, shoulders, sleeves, fit, front/back design, hem and fabric details."
             )
             crop_rule = (
-                "Do not deliver a distant full-body portrait for this slot. Crop out most or all of the legs when needed so the upper-body product dominates."
+                "Do not deliver a distant full-body portrait for this slot. Crop out most or all of the legs when needed so the upper-body product dominates. "
+                "Keep the product hem visible and do not let complementary bottoms become the main subject."
             )
         return (
             "PRODUCT-FOCUSED CAMERA FRAMING:\n"
@@ -227,7 +259,7 @@ The product itself must remain visually identical to the source.
         # Standardize pose
         pose_key = pose.lower().strip()
         pose_desc = (
-            FOCUSED_POSES.get(pose_key)
+            GPTPromptBuilder.focused_pose_description(garment_json, pose_key)
             if product_focus
             else POSES.get(pose_key, POSES["front"])
         )
@@ -434,7 +466,7 @@ The product itself must remain visually identical to the source.
 
         pose_key = pose.lower().strip()
         pose_desc = (
-            FOCUSED_POSES.get(pose_key)
+            GPTPromptBuilder.focused_pose_description(garment_json, pose_key)
             if product_focus
             else POSES.get(pose_key, POSES["front"])
         )
