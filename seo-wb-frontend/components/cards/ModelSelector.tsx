@@ -2,21 +2,13 @@
 
 import React from "react";
 import type { RuntimeModelTemplate } from "@/lib/modelTemplates";
-import { API_BASE } from "@/lib/api";
+import { publicAssetUrl } from "@/lib/api";
 
 interface ModelSelectorProps {
   selectedModelId: string;
   models: RuntimeModelTemplate[];
   onSelectModel: (model: RuntimeModelTemplate) => void;
 }
-
-const getImageUrl = (url: string | null | undefined) => {
-  if (!url) return "";
-  if (url.startsWith("/storage")) {
-    return `${API_BASE.replace("/api/v1", "")}${url}`;
-  }
-  return url; // Static public assets like /models/... loaded relatively from frontend origin
-};
 
 export function ModelSelector({
   selectedModelId,
@@ -53,7 +45,7 @@ export function ModelSelector({
                 <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg bg-zinc-50 border border-zinc-100">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={getImageUrl(model.frontImageUrl)}
+                    src={publicAssetUrl(model.frontImageUrl)}
                     alt={model.name}
                     className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                   />

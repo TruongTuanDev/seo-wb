@@ -6,7 +6,7 @@ import { ArrowRight, Edit3, ImageIcon, Plus, Search, Sparkles, Trash2 } from "lu
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { API_BASE, api } from "@/lib/api";
+import { API_BASE, api, publicAssetUrl } from "@/lib/api";
 import { useToast } from "@/contexts/ToastContext";
 import { useStore } from "@/contexts/StoreContext";
 
@@ -316,6 +316,7 @@ function getCharacteristic(variant: DraftVariant, id: number, names: string[]) {
 function getCoverUrl(variant: DraftVariant) {
   const raw = variant.media?.cover || variant.media?.local_files?.[0]?.url || "";
   if (!raw) return "";
+  if (raw.startsWith("/storage")) return publicAssetUrl(raw);
   return raw.startsWith("http") ? raw : `${API_BASE}${raw}`;
 }
 

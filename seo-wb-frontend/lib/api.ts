@@ -2,6 +2,36 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:800
 const CSRF_COOKIE_NAME = process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME || "seller_wb_csrf";
 const ADMIN_CSRF_COOKIE_NAME = process.env.NEXT_PUBLIC_ADMIN_CSRF_COOKIE_NAME || "seller_wb_admin_csrf";
 
+export function publicAssetUrl(url: string | null | undefined) {
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url) || url.startsWith("data:") || url.startsWith("blob:")) {
+    return url;
+  }
+  if (!url.startsWith("/storage")) {
+    return url;
+  }
+  return `${apiPublicOrigin()}${url}`;
+}
+
+function apiPublicOrigin() {
+  const cleanBase = API_BASE.replace(/\/+$/, "");
+  if (cleanBase.startsWith("/")) {
+    if (typeof window !== "undefined" && window.location.hostname === "localhost" && window.location.port === "3030") {
+      return "http://localhost:8000";
+    }
+    return "";
+  }
+  try {
+    const parsed = new URL(cleanBase);
+    parsed.pathname = parsed.pathname.replace(/\/api\/v\d+$/i, "").replace(/\/api$/i, "");
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return cleanBase.replace(/\/api\/v\d+$/i, "").replace(/\/api$/i, "");
+  }
+}
+
 interface ApiOptions extends RequestInit {
   requireAuth?: boolean;
   redirectOnUnauthorized?: boolean;

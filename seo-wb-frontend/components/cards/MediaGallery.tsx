@@ -7,7 +7,7 @@ import type { VariantCardState } from "@/components/cards/types";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { ModelSelector } from "@/components/cards/ModelSelector";
-import { API_BASE, api } from "@/lib/api";
+import { API_BASE, api, publicAssetUrl } from "@/lib/api";
 import { fetchRuntimeAiStudioSettings, fetchRuntimeModelTemplates, RuntimeModelTemplate } from "@/lib/modelTemplates";
 import { fetchShopModels, type ShopModel } from "@/lib/shopModels";
 import { useStore } from "@/contexts/StoreContext";
@@ -182,6 +182,7 @@ function normalizeCatalogQuantity(quantity: number): 3 | 6 | 8 {
 function toMediaUrl(url?: string | null) {
   if (!url) return null;
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (url.startsWith("/storage")) return publicAssetUrl(url);
   return `${API_BASE}${url.startsWith("/") ? url : `/${url}`}`;
 }
 

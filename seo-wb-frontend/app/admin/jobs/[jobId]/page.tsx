@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/contexts/ToastContext";
-import { api, API_BASE } from "@/lib/api";
+import { api, publicAssetUrl } from "@/lib/api";
 
 type JobAsset = {
   label?: string;
@@ -70,7 +70,7 @@ type JobDetail = {
 function toImageUrl(url?: string | null) {
   if (!url) return null;
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  return `${API_BASE.replace("/api/v1", "")}${url}`;
+  return publicAssetUrl(url);
 }
 
 function JsonCard({ title, value }: { title: string; value: unknown }) {

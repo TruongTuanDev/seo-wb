@@ -18,7 +18,7 @@ import { useToast } from "@/contexts/ToastContext";
 import { useCardForm } from "@/hooks/useCardForm";
 import { useDraftAutosave } from "@/hooks/useDraftAutosave";
 import { useJobStatus } from "@/hooks/useJobStatus";
-import { API_BASE, api } from "@/lib/api";
+import { API_BASE, api, publicAssetUrl } from "@/lib/api";
 import { ArrowRight, ArrowLeft, RefreshCw, CheckCircle, UploadCloud } from "lucide-react";
 
 type CreationMode = "create_new" | "add_to_existing_imt" | "create_then_merge";
@@ -137,6 +137,7 @@ function DraftAutosaveBridge({
 function mediaUrl(url?: string) {
   if (!url) return null;
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (url.startsWith("/storage")) return publicAssetUrl(url);
   return `${API_BASE}${url.startsWith("/") ? url : `/${url}`}`;
 }
 

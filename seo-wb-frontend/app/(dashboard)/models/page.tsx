@@ -5,7 +5,7 @@ import { ImagePlus, Trash2, UserRound, UsersRound } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
-import { API_BASE, api } from "@/lib/api";
+import { api, publicAssetUrl } from "@/lib/api";
 import { fetchShopModels, type ShopModel } from "@/lib/shopModels";
 import { useStore } from "@/contexts/StoreContext";
 import { useToast } from "@/contexts/ToastContext";
@@ -158,7 +158,7 @@ export default function ShopModelsPage() {
 }
 
 function modelUrl(url: string) {
-  return url.startsWith("/storage") ? `${API_BASE.replace("/api/v1", "")}${url}` : url;
+  return publicAssetUrl(url);
 }
 
 function messageFrom(value: unknown) {

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { useToast } from "@/contexts/ToastContext";
-import { api, API_BASE } from "@/lib/api";
+import { api, publicAssetUrl } from "@/lib/api";
 
 type ModelTemplate = {
   id: string;
@@ -57,11 +57,7 @@ const getGarmentTypeLabel = (type: string | null | undefined) => {
 };
 
 const getImageUrl = (url: string | null | undefined) => {
-  if (!url) return "";
-  if (url.startsWith("/storage")) {
-    return `${API_BASE.replace("/api/v1", "")}${url}`;
-  }
-  return url; // Static public assets like /models/... loaded relatively from frontend origin
+  return publicAssetUrl(url);
 };
 
 function ModelCard({ model, onEdit, onDelete }: { model: ModelTemplate; onEdit: (model: ModelTemplate) => void; onDelete: (id: string) => void }) {
