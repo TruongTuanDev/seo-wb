@@ -29,11 +29,11 @@ POSES = {
 
 FOCUSED_POSES = {
     "front": "Front-facing product-focused crop. Keep the product straight to camera and let the product dominate the frame.",
-    "crop_front": "Front-facing lower-abdomen-to-shoes product-focused crop. Start around the navel/lower belly above the waistband, keep the waistband fully visible, keep both legs and hems visible, and let the product dominate the frame.",
+    "crop_front": "Front-facing upper-abdomen-to-shoes product-focused crop. Start above the belly at the shirt hem or upper abdomen, keep visible space above the waistband, keep both legs and hems visible, and let the product dominate the frame.",
     "side_45": "45-degree product-focused crop. Keep the product visible from the side angle and let the product dominate the frame.",
-    "crop_side_45": "45-degree side lower-abdomen-to-shoes product-focused crop. Start around the navel/lower belly above the waistband. Show product width, silhouette, side seam and fit clearly. Make this look different from the front crop by rotating the hips/body to a real side angle.",
+    "crop_side_45": "45-degree side upper-abdomen-to-shoes product-focused crop. Start above the belly at the shirt hem or upper abdomen with visible space above the waistband. Show product width, silhouette, side seam and fit clearly. Make this look different from the front crop by rotating the hips/body to a real side angle.",
     "back": "Back-facing product-focused crop. Show the back of the product clearly and let the product dominate the frame.",
-    "crop_back": "Back-facing lower-abdomen-to-shoes product-focused crop. Start around the lower back above the waistband. Show the back construction, full back waistband, pockets, seams, hem and fit clearly. Make this look different from the front crop by showing the rear view only.",
+    "crop_back": "Back-facing upper-abdomen-to-shoes product-focused crop. Start above the lower back/waistband with visible space above the waistband. Show the back construction, full back waistband, pockets, seams, hem and fit clearly. Make this look different from the front crop by showing the rear view only.",
     "banner_focus": "Product-focused marketplace banner crop. Use a clean composition where the product dominates the frame."
 }
 
@@ -77,12 +77,12 @@ class GPTPromptBuilder:
         area = str(garment_json.get("garment_area") or "upper_body").lower().strip()
         if area == "lower_body":
             framing = (
-                "Frame primarily from the lower abdomen/navel level to the shoes. The lower-body product must occupy 75-85% of the image. "
+                "Frame primarily from the upper abdomen or shirt-hem level to the shoes. The lower-body product must occupy 75-85% of the image. "
                 "The buyer should immediately understand the waist, pockets, leg width, length, hem and overall fit."
             )
             crop_rule = (
                 "Do not deliver a full-body portrait for this slot. Crop out most or all of the face and most of the upper torso. "
-                "Keep a little belly/waist area above the waistband visible, keep the waistband near the upper part of the frame, and keep the shoes or hem near the lower part of the frame."
+                "Keep the shirt hem or upper belly area above the waistband visible, keep the waistband clearly below the top edge of the frame, and keep the shoes or hem near the lower part of the frame."
             )
         elif area == "full_body":
             framing = (
