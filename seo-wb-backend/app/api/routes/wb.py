@@ -132,7 +132,14 @@ async def suggest_tnved(
     settings: Annotated[Settings, Depends(get_settings)],
     user: Annotated[User, Depends(get_current_user)],
 ):
-    return await _flow(db, settings, user, store_id).suggest_tnved(payload.subjectID, payload.search)
+    return await _flow(db, settings, user, store_id).suggest_tnved(
+        payload.subjectID,
+        payload.search,
+        subject_name=payload.subjectName,
+        category=payload.category,
+        gender=payload.gender,
+        material=payload.material,
+    )
 
 
 @router.post("/payload/enrich-tnved")
@@ -147,6 +154,10 @@ async def enrich_payload_tnved(
         payload.subjectID,
         payload.payload,
         payload.search,
+        subject_name=payload.subjectName,
+        category=payload.category,
+        gender=payload.gender,
+        material=payload.material,
     )
 
 

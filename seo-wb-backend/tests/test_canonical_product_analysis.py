@@ -224,3 +224,27 @@ async def test_generate_draft_persists_canonical_garment_analysis_for_image_jobs
     assert draft.garment_json["garment_area"] == "lower_body"
     assert draft.garment_json["source_title"] == "Wide trousers"
     assert draft.analysis["garment_json"] == draft.garment_json
+
+
+@pytest.mark.anyio
+async def test_suggest_tnved_reranks_candidates_with_fashion_hint():
+    service = CardFlowService.__new__(CardFlowService)
+    service._wb = SimpleNamespace(
+        get_tnved=AsyncMock(
+            return_value=[
+                {"tnved": "6203421100", "name": "Брюки мужские из хлопчатобумажной ткани, не трикотажные"},
+                {"tnved": "6204623100", "name": "Брюки женские из хлопчатобумажной ткани, не трикотажные"},
+            ]
+        )
+    )
+
+    result = await service.suggest_tnved(
+        11,
+        subject_name="Брюки",
+        category="брюки",
+        gender="женский",
+        material="хлопок",
+    )
+
+    assert result["selected"]["tnved"] == "6204623100"
+    assert result["data"][0]["tnved"] == "6204623100"

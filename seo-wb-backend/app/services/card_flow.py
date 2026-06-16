@@ -15,6 +15,7 @@ from app.services.card_payload_enricher import CardPayloadEnricher
 from app.services.garment_analyzer import GarmentAnalyzer
 from app.services.gemini_analyzer import GeminiAnalyzer
 from app.services.subject_resolver import SubjectResolver
+from app.services.tnved_selector import FashionTnvedSelector
 from app.services.wb_client import WildberriesClient
 from starlette.concurrency import run_in_threadpool
 
@@ -40,7 +41,13 @@ class CardFlowService:
             lambda: run_in_threadpool(CardGenerator(self._settings).generate, user_input, analysis, subject, charcs),
         )
         raw_payload = [group.model_dump(mode="json", exclude_none=True) for group in card_payload]
-        await self._enrich_payload(raw_payload, int(subject["subjectID"]), user_input=user_input, analysis=analysis)
+        await self._enrich_payload(
+            raw_payload,
+            int(subject["subjectID"]),
+            subject_name=str(subject.get("subjectName") or ""),
+            user_input=user_input,
+            analysis=analysis,
+        )
         first_variant = raw_payload[0]["variants"][0] if raw_payload and raw_payload[0].get("variants") else {}
         garment_json = GarmentAnalyzer.normalize_analysis(
             analysis.garment_json,
@@ -107,15 +114,62 @@ class CardFlowService:
     async def get_card_errors(self) -> dict[str, Any]:
         return await self._wb.get_card_errors()
 
-    async def suggest_tnved(self, subject_id: int, search: str | None = None) -> dict[str, Any]:
+    async def suggest_tnved(
+        self,
+        subject_id: int,
+        search: str | None = None,
+        *,
+        subject_name: str | None = None,
+        category: str | None = None,
+        gender: str | None = None,
+        material: str | None = None,
+        user_input: ProductInput | None = None,
+        analysis: ImageAnalysis | None = None,
+        payload: Any | None = None,
+    ) -> dict[str, Any]:
         items = await self._wb.get_tnved(subject_id, search=search, locale="ru")
-        return {"data": items, "selected": items[0] if items else None}
+        hint = FashionTnvedSelector.build_hint(
+            subject_id=subject_id,
+            subject_name=subject_name,
+            category=category,
+            gender=gender,
+            material=material,
+            search=search,
+            user_input=user_input,
+            analysis=analysis,
+            payload=payload,
+        )
+        selected, scored = FashionTnvedSelector.select_best(items, hint)
+        return {"data": scored, "selected": selected, "selectionHint": hint.__dict__}
 
-    async def enrich_payload_with_tnved(self, subject_id: int, payload: Any, search: str | None = None) -> dict[str, Any]:
+    async def enrich_payload_with_tnved(
+        self,
+        subject_id: int,
+        payload: Any,
+        search: str | None = None,
+        *,
+        subject_name: str | None = None,
+        category: str | None = None,
+        gender: str | None = None,
+        material: str | None = None,
+        user_input: ProductInput | None = None,
+        analysis: ImageAnalysis | None = None,
+    ) -> dict[str, Any]:
         items = await self._wb.get_tnved(subject_id, search=search, locale="ru")
-        selected = items[0] if items else None
+        hint = FashionTnvedSelector.build_hint(
+            subject_id=subject_id,
+            subject_name=subject_name,
+            category=category,
+            gender=gender,
+            material=material,
+            search=search,
+            user_input=user_input,
+            analysis=analysis,
+            payload=payload,
+        )
+        selected, scored = FashionTnvedSelector.select_best(items, hint)
         if not selected:
-            return {"payload": payload, "tnved": None, "applied": False}
+            return {"payload": payload, "tnved": None, "applied": False, "data": scored, "selectionHint": hint.__dict__}
 
         charcs = await self._wb.get_subject_charcs(subject_id, locale="ru")
         seasons = await self._wb.get_seasons(locale="ru")
@@ -124,7 +178,7 @@ class CardFlowService:
             subject_id=subject_id,
             tnved=selected,
         )
-        return {"payload": payload, "tnved": selected, "applied": True}
+        return {"payload": payload, "tnved": selected, "applied": True, "data": scored, "selectionHint": hint.__dict__}
 
     async def upload_media_links(self, nm_id: int, links: list[str]) -> dict[str, Any]:
         return await self._wb.upload_media_links(nm_id, links)
@@ -182,6 +236,7 @@ class CardFlowService:
         self,
         payload: Any,
         subject_id: int,
+        subject_name: str | None = None,
         *,
         user_input: ProductInput | None = None,
         analysis: ImageAnalysis | None = None,
@@ -189,7 +244,14 @@ class CardFlowService:
         charcs = await self._wb.get_subject_charcs(subject_id, locale="ru")
         seasons = await self._wb.get_seasons(locale="ru")
         tnved_items = await self._wb.get_tnved(subject_id, locale="ru")
-        tnved = tnved_items[0] if tnved_items else None
+        hint = FashionTnvedSelector.build_hint(
+            subject_id=subject_id,
+            subject_name=subject_name,
+            user_input=user_input,
+            analysis=analysis,
+            payload=payload,
+        )
+        tnved, _ = FashionTnvedSelector.select_best(tnved_items, hint)
         CardPayloadEnricher(charcs, directories={"season": seasons}).enrich_payload(
             payload,
             subject_id=subject_id,

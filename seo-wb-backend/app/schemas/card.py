@@ -161,12 +161,20 @@ class CardListRequest(BaseModel):
 class TnvedSuggestionRequest(BaseModel):
     subjectID: int
     search: str | None = None
+    subjectName: str | None = None
+    category: str | None = None
+    gender: str | None = None
+    material: str | None = None
 
 
 class PayloadTnvedEnrichRequest(BaseModel):
     subjectID: int
     payload: Any
     search: str | None = None
+    subjectName: str | None = None
+    category: str | None = None
+    gender: str | None = None
+    material: str | None = None
 
 
 class PushResponse(BaseModel):
