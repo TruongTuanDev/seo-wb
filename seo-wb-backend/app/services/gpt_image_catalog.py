@@ -124,12 +124,12 @@ def _normalized_focus_crop_box(garment_area: str, pose: str) -> tuple[float, flo
     # Hard framing for focused catalog slots so they do not collapse back into full-body shots.
     if area == "lower_body":
         boxes = {
-            # Lower-body crops must start around the waistband, not mid-thigh.
-            "crop_front": (0.10, 0.20, 0.90, 0.99),
-            "crop_side_45": (0.16, 0.20, 0.94, 0.99),
-            "crop_back": (0.10, 0.20, 0.90, 0.99),
+            # Lower-body crops must start around lower abdomen/navel level, not mid-thigh.
+            "crop_front": (0.08, 0.10, 0.92, 0.99),
+            "crop_side_45": (0.12, 0.10, 0.96, 0.99),
+            "crop_back": (0.08, 0.10, 0.92, 0.99),
         }
-        return boxes.get(pose_key, (0.10, 0.20, 0.90, 0.99))
+        return boxes.get(pose_key, (0.08, 0.10, 0.92, 0.99))
     if area == "upper_body":
         boxes = {
             # Upper-body crops keep neckline/shoulders through hem; legs should not dominate.

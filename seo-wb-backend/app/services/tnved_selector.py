@@ -64,6 +64,8 @@ class FashionTnvedSelector:
         family = cls._infer_family(source_text)
         audience = cls._infer_audience(source_text)
         knit_state = cls._infer_knit_state(source_text)
+        if knit_state is None and family in {"pants", "jeans", "shorts", "skirt", "dress", "shirt", "blouse", "jacket", "coat"}:
+            knit_state = "woven"
         material_family = cls._infer_material_family(source_text)
         reasons = [
             f"family={family}" if family else None,
@@ -116,21 +118,29 @@ class FashionTnvedSelector:
         expected_prefixes = cls._expected_prefixes(hint)
         if expected_prefixes:
             if any(tnved_code.startswith(prefix) for prefix in expected_prefixes):
-                score += 4.0
+                score += 7.0
                 reasons.append(f"tnved_prefix_match={tnved_code}")
             else:
-                score -= 1.0
+                score -= 5.0
                 reasons.append("tnved_prefix_mismatch")
 
         family_terms = cls._family_terms(hint.family)
         if family_terms and any(term in text for term in family_terms):
             score += 2.4
             reasons.append(f"family_match={hint.family}")
+        family_conflicts = cls._conflicting_family_terms(hint.family)
+        if family_conflicts and any(term in text for term in family_conflicts):
+            score -= 3.5
+            reasons.append("family_conflict")
 
         audience_terms = cls._audience_terms(hint.audience)
         if audience_terms and any(term in text for term in audience_terms):
             score += 1.8
             reasons.append(f"audience_match={hint.audience}")
+        audience_conflicts = cls._conflicting_audience_terms(hint.audience)
+        if audience_conflicts and any(term in text for term in audience_conflicts):
+            score -= 3.2
+            reasons.append("audience_conflict")
 
         if hint.knit_state == "knit":
             if "трикотаж" in text or "вязан" in text:
@@ -168,22 +178,59 @@ class FashionTnvedSelector:
         family = hint.family
         if not audience or not knit or not family:
             return []
+        material = hint.material_family
+        is_female_side = audience in {"female", "girls"}
+        is_male_side = audience in {"male", "boys"}
+
+        if family in {"pants", "jeans", "shorts"}:
+            if knit == "knit":
+                if is_female_side:
+                    return cls._trouser_material_prefixes("61046", material)
+                if is_male_side:
+                    return cls._trouser_material_prefixes("61034", material)
+            if is_female_side:
+                return cls._trouser_material_prefixes("62046", material)
+            if is_male_side:
+                return cls._trouser_material_prefixes("62034", material)
+
+        if family == "skirt" and is_female_side:
+            return ["61045"] if knit == "knit" else ["62045"]
+
+        if family == "dress" and is_female_side:
+            return ["61044"] if knit == "knit" else ["62044"]
+
+        if family == "tshirt":
+            return ["6109"]
+
         if family in {"pants", "jeans", "shorts", "skirt", "dress"}:
-            if audience in {"female", "girls"}:
+            if is_female_side:
                 return ["6104"] if knit == "knit" else ["6204"]
-            if audience in {"male", "boys"}:
+            if is_male_side:
                 return ["6103"] if knit == "knit" else ["6203"]
         if family in {"shirt", "blouse"}:
-            if audience in {"female", "girls"}:
+            if is_female_side:
                 return ["6106"] if knit == "knit" else ["6206"]
-            if audience in {"male", "boys"}:
+            if is_male_side:
                 return ["6105"] if knit == "knit" else ["6205"]
         if family in {"jacket", "coat"}:
-            if audience in {"female", "girls"}:
+            if is_female_side:
                 return ["6102"] if knit == "knit" else ["6202"]
-            if audience in {"male", "boys"}:
+            if is_male_side:
                 return ["6101"] if knit == "knit" else ["6201"]
         return []
+
+    @staticmethod
+    def _trouser_material_prefixes(base: str, material_family: str | None) -> list[str]:
+        suffix_by_material = {
+            "wool": "1",
+            "cotton": "2",
+            "flax": "2",
+            "synthetic": "3",
+        }
+        suffix = suffix_by_material.get(material_family or "")
+        if suffix:
+            return [f"{base}{suffix}", base]
+        return [base]
 
     @staticmethod
     def _family_terms(family: str | None) -> tuple[str, ...]:
@@ -200,6 +247,17 @@ class FashionTnvedSelector:
         }
         return mapping.get(family or "", ())
 
+    @classmethod
+    def _conflicting_family_terms(cls, family: str | None) -> tuple[str, ...]:
+        if not family:
+            return ()
+        terms: list[str] = []
+        for other_family in ("pants", "jeans", "shorts", "skirt", "dress", "shirt", "blouse", "jacket", "coat"):
+            if other_family == family:
+                continue
+            terms.extend(cls._family_terms(other_family))
+        return tuple(terms)
+
     @staticmethod
     def _audience_terms(audience: str | None) -> tuple[str, ...]:
         mapping = {
@@ -210,6 +268,14 @@ class FashionTnvedSelector:
             "unisex": ("unisex",),
         }
         return mapping.get(audience or "", ())
+
+    @classmethod
+    def _conflicting_audience_terms(cls, audience: str | None) -> tuple[str, ...]:
+        if audience in {"female", "girls"}:
+            return cls._audience_terms("male") + cls._audience_terms("boys")
+        if audience in {"male", "boys"}:
+            return cls._audience_terms("female") + cls._audience_terms("girls")
+        return ()
 
     @staticmethod
     def _material_terms(material_family: str | None) -> tuple[str, ...]:

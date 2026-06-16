@@ -53,3 +53,40 @@ def test_selector_prefers_womens_synthetic_blouse_code():
 
     assert selected is not None
     assert selected["tnved"] == "6206400000"
+
+
+def test_selector_rejects_womens_trouser_code_for_male_pants():
+    items = [
+        {"tnved": "6204623100", "name": "Брюки женские из хлопчатобумажной ткани, не трикотажные"},
+        {"tnved": "6203421100", "name": "Брюки мужские из хлопчатобумажной ткани, не трикотажные"},
+    ]
+    hint = FashionTnvedSelector.build_hint(
+        subject_id=11,
+        subject_name="Брюки",
+        analysis=ImageAnalysis(category="брюки", gender="мужской", material="хлопок"),
+    )
+
+    selected, scored = FashionTnvedSelector.select_best(items, hint)
+
+    assert selected is not None
+    assert selected["tnved"] == "6203421100"
+    assert "tnved_prefix_match=6203421100" in scored[0]["scoreReasons"]
+    assert "audience_conflict" in scored[1]["scoreReasons"]
+
+
+def test_selector_prefers_skirt_specific_prefix_over_general_womens_group():
+    items = [
+        {"tnved": "6204623100", "name": "Брюки женские из хлопчатобумажной ткани, не трикотажные"},
+        {"tnved": "6204520000", "name": "Юбки женские из хлопчатобумажной ткани, не трикотажные"},
+    ]
+    hint = FashionTnvedSelector.build_hint(
+        subject_id=12,
+        subject_name="Юбки",
+        analysis=ImageAnalysis(category="юбка", gender="женский", material="хлопок"),
+    )
+
+    selected, scored = FashionTnvedSelector.select_best(items, hint)
+
+    assert selected is not None
+    assert selected["tnved"] == "6204520000"
+    assert scored[0]["score"] > scored[1]["score"]

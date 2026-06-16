@@ -104,7 +104,7 @@ def test_gpt_prompt_builder():
         product_focus=True,
     )
     assert "PRODUCT-FOCUSED CAMERA FRAMING" in focused_prompt
-    assert "Frame primarily from the waist to the shoes." in focused_prompt
+    assert "Frame primarily from the lower abdomen/navel level to the shoes." in focused_prompt
     assert "The lower-body product must occupy 75-85% of the image." in focused_prompt
     assert "Front-facing product-focused crop" in focused_prompt
     assert "Front-facing full-body catalog pose" not in focused_prompt
@@ -115,7 +115,7 @@ def test_gpt_prompt_builder():
         "crop_side_45",
         product_focus=True,
     )
-    assert "45-degree side waist-to-shoes product-focused crop" in side_crop_prompt
+    assert "45-degree side lower-abdomen-to-shoes product-focused crop" in side_crop_prompt
     assert "leg width" in side_crop_prompt
     assert "real side angle" in side_crop_prompt
 
@@ -125,7 +125,7 @@ def test_gpt_prompt_builder():
         "crop_front",
         product_focus=True,
     )
-    assert "waist-to-shoes product-focused crop" in front_crop_prompt
+    assert "lower-abdomen-to-shoes product-focused crop" in front_crop_prompt
     assert "waistband fully visible near the top of frame" in front_crop_prompt
 
     upper_prompt = GPTPromptBuilder.build_prompt(
@@ -142,7 +142,7 @@ def test_gpt_prompt_builder():
     )
     assert "45-degree upper-body product crop" in upper_prompt
     assert "neckline, collar, shoulders, sleeves" in upper_prompt
-    assert "waist-to-shoes" not in upper_prompt
+    assert "lower-abdomen-to-shoes" not in upper_prompt
 
     full_body_prompt = GPTPromptBuilder.build_prompt(
         {
@@ -158,7 +158,7 @@ def test_gpt_prompt_builder():
     )
     assert "Back-facing full-garment product image" in full_body_prompt
     assert "complete outfit shape" in full_body_prompt
-    assert "waist-to-shoes" not in full_body_prompt
+    assert "lower-abdomen-to-shoes" not in full_body_prompt
 
     lifestyle_prompt = GPTPromptBuilder.build_prompt(garment_json, "studio", "walking")
     assert "LIFESTYLE/WALKING STYLING" in lifestyle_prompt
