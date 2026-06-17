@@ -46,24 +46,24 @@ class GPTPromptBuilder:
 
         if area == "upper_body":
             descriptions = {
-                "front": "Front-facing upper-body product crop. Show neckline, shoulders, sleeves, chest/body fit, front design and hem clearly. Crop around upper chest/shoulders to hips or upper thigh so the top dominates.",
-                "crop_front": "Front-facing upper-body product crop. Show neckline, shoulders, sleeves, chest/body fit, front design and hem clearly. Crop around upper chest/shoulders to hips or upper thigh so the top dominates.",
-                "side_45": "45-degree upper-body product crop. Rotate the torso to reveal sleeve shape, side seam, fabric fall, hem and thickness while keeping the top dominant.",
-                "crop_side_45": "45-degree upper-body product crop. Rotate the torso to reveal sleeve shape, side seam, fabric fall, hem and thickness while keeping the top dominant.",
-                "back": "Back-facing upper-body product crop. Show collar/back neckline, shoulder line, back panel, sleeves, back hem and any rear details clearly.",
-                "crop_back": "Back-facing upper-body product crop. Show collar/back neckline, shoulder line, back panel, sleeves, back hem and any rear details clearly.",
+                "front": "Front-facing upper-body product crop. Show neckline/collar, shoulders, sleeve length, cuffs, chest fit, front closure/print, body width and hem clearly. Crop from upper chest or shoulders to hips/upper thigh so the top dominates.",
+                "crop_front": "Front-facing upper-body product crop. Show neckline/collar, shoulders, sleeve length, cuffs, chest fit, front closure/print, body width and hem clearly. Crop from upper chest or shoulders to hips/upper thigh so the top dominates.",
+                "side_45": "45-degree upper-body product crop. Rotate the torso to reveal sleeve volume, armhole, side seam, fabric drape, garment thickness, hem length and fit while keeping the top dominant.",
+                "crop_side_45": "45-degree upper-body product crop. Rotate the torso to reveal sleeve volume, armhole, side seam, fabric drape, garment thickness, hem length and fit while keeping the top dominant.",
+                "back": "Back-facing upper-body product crop. Show back neckline/collar or hood, shoulder line, back panel, sleeves/cuffs, back hem, seams and rear details clearly.",
+                "crop_back": "Back-facing upper-body product crop. Show back neckline/collar or hood, shoulder line, back panel, sleeves/cuffs, back hem, seams and rear details clearly.",
                 "banner_focus": "Upper-body product banner crop. Keep the top as the main subject with clean marketplace composition and no lower-body distraction.",
             }
             return descriptions.get(pose_key, descriptions["front"])
 
         if area == "full_body":
             descriptions = {
-                "front": "Front-facing full-garment product image. Keep the entire outfit visible from neckline/shoulders to hem, with the garment filling the frame and minimal empty background.",
-                "crop_front": "Front-facing full-garment product image. Keep the entire outfit visible from neckline/shoulders to hem, with the garment filling the frame and minimal empty background.",
-                "side_45": "45-degree full-garment product image. Show side silhouette, waistline, garment length, sleeves/straps, hem movement and complete outfit shape.",
-                "crop_side_45": "45-degree full-garment product image. Show side silhouette, waistline, garment length, sleeves/straps, hem movement and complete outfit shape.",
-                "back": "Back-facing full-garment product image. Show rear neckline, back panel, waistline, length, hem and complete outfit shape without converting the garment.",
-                "crop_back": "Back-facing full-garment product image. Show rear neckline, back panel, waistline, length, hem and complete outfit shape without converting the garment.",
+                "front": "Front-facing full-garment/set product image. Keep every outfit component visible from neckline/shoulders to hem, including top part, bottom/skirt/trouser part, waist connection, sleeves/straps and full length. Minimal empty background.",
+                "crop_front": "Front-facing full-garment/set product image. Keep every outfit component visible from neckline/shoulders to hem, including top part, bottom/skirt/trouser part, waist connection, sleeves/straps and full length. Minimal empty background.",
+                "side_45": "45-degree full-garment/set product image. Show side silhouette, waistline or set transition, sleeve/strap shape, bottom width, garment length, hem movement and complete outfit structure.",
+                "crop_side_45": "45-degree full-garment/set product image. Show side silhouette, waistline or set transition, sleeve/strap shape, bottom width, garment length, hem movement and complete outfit structure.",
+                "back": "Back-facing full-garment/set product image. Show rear neckline, back panel, sleeve/strap back, waistline or set transition, bottom back shape, length, hem and complete outfit structure.",
+                "crop_back": "Back-facing full-garment/set product image. Show rear neckline, back panel, sleeve/strap back, waistline or set transition, bottom back shape, length, hem and complete outfit structure.",
                 "banner_focus": "Full-garment marketplace banner. Keep the complete outfit visible and dominant, using a clean composition with enough space for marketplace cropping.",
             }
             return descriptions.get(pose_key, descriptions["front"])
@@ -86,20 +86,21 @@ class GPTPromptBuilder:
             )
         elif area == "full_body":
             framing = (
-                "Show the complete full-body garment from neckline/shoulders to hem. The garment must occupy 75-85% of the image. "
-                "The buyer should immediately understand neckline, sleeves/straps, waistline, silhouette, length, movement and hem."
+                "Show the complete full-body garment or coordinated set from neckline/shoulders to hem. The product must occupy 75-85% of the image. "
+                "The buyer should immediately understand all outfit components: neckline/collar, sleeves/straps, top body, waistline or set transition, lower part, silhouette, length, movement and hem."
             )
             crop_rule = (
-                "Do not turn this into a distant full-body portrait. Keep the entire outfit visible, but remove excessive empty space around the model."
+                "Do not turn this into a distant full-body portrait. Keep the entire outfit visible, but remove excessive empty space around the model. "
+                "Do not crop away any component of a set, jumpsuit, dress, sarafan, or coordinated outfit."
             )
         else:
             framing = (
                 "Frame primarily from upper chest/shoulders to hips or upper thigh depending on garment length. "
-                "The upper-body product must occupy 75-85% of the image. The buyer should immediately understand neckline, collar, shoulders, sleeves, fit, front/back design, hem and fabric details."
+                "The upper-body product must occupy 75-85% of the image. The buyer should immediately understand neckline/collar/hood, shoulder line, sleeve length, cuffs, chest fit, closure or print, body width, hem and fabric details."
             )
             crop_rule = (
                 "Do not deliver a distant full-body portrait for this slot. Crop out most or all of the legs when needed so the upper-body product dominates. "
-                "Keep the product hem visible and do not let complementary bottoms become the main subject."
+                "Keep the product hem visible and do not let complementary bottoms become the main subject. Do not crop off sleeves, cuffs, collar, hood or hem."
             )
         return (
             "PRODUCT-FOCUSED CAMERA FRAMING:\n"
@@ -120,10 +121,10 @@ class GPTPromptBuilder:
             protection = "Accessories and the top must never cover the waistband, pockets, leg silhouette, hem, or product fabric."
         elif area == "upper_body":
             accessory_examples = "simple jeans/trousers, minimal bag, watch, or clean shoes"
-            protection = "Accessories and bottoms must never cover the neckline, sleeves, hem, front design, or product fabric."
+            protection = "Accessories and bottoms must never cover the neckline/collar/hood, shoulders, sleeves, cuffs, hem, front design, closure, print, logo, or product fabric."
         else:
             accessory_examples = "simple shoes, small bag, minimal watch, or other subtle ecommerce accessories"
-            protection = "Accessories must never cover the garment silhouette, neckline, waistline, hem, sleeves, or product fabric."
+            protection = "Accessories must never cover any outfit component, garment silhouette, neckline, waistline, set transition, hem, sleeves, or product fabric."
         return (
             "LIFESTYLE/WALKING STYLING:\n"
             "Use a clean real-world ecommerce background such as a minimal studio corner, school corridor, clean street, showroom, or simple interior.\n"
@@ -148,13 +149,43 @@ class GPTPromptBuilder:
                 "COMPLEMENTARY OUTFIT STYLING:\n"
                 "The uploaded upper-body garment is the product and must remain unchanged.\n"
                 "You may replace or restyle only the model's lower-body clothing with tasteful coordinated ecommerce bottoms.\n"
-                "The bottoms must not cover the product hem, silhouette, or any product detail."
+                "The bottoms must not cover the product hem, silhouette, side seams, cuffs, closure, print, logo, or any product detail.\n"
+                "Never turn the upper-body product into a dress, jumpsuit, skirt, pants, or full outfit."
             )
         return (
             "FULL OUTFIT LOCK:\n"
             "The uploaded product is a full-body garment or coordinated set.\n"
-            "Preserve every visible part of the outfit exactly and do not replace, remove, or redesign any component."
+            "Preserve every visible part of the outfit exactly and do not replace, remove, or redesign any component.\n"
+            "For a coordinated set, keep the top and bottom as the same article family: same color/material logic, same trim, same fabric texture, same proportions and matching style.\n"
+            "Do not split the set into unrelated clothing, do not swap only the top or only the bottom, and do not convert a dress/jumpsuit/set into separates unless the reference product is clearly separates."
         )
+
+    @staticmethod
+    def garment_identity_lock_block(garment_json: dict[str, Any]) -> str:
+        area = str(garment_json.get("garment_area") or "upper_body").lower().strip()
+        product_type = str(garment_json.get("product_type") or garment_json.get("category") or "garment").strip()
+        if area == "lower_body":
+            return (
+                "LOWER-BODY PRODUCT IDENTITY LOCK:\n"
+                f"The product is {product_type}. Preserve waistband height, front/back rise, leg width, length, hem, side seams, pockets, closure, pleats, darts, fabric weight and drape.\n"
+                "Do not turn pants/jeans/shorts into a skirt or a top. Do not hide the waistband, pockets, leg shape, hem or fabric texture."
+            )
+        if area == "upper_body":
+            return (
+                "UPPER-BODY PRODUCT IDENTITY LOCK:\n"
+                f"The product is {product_type}. Preserve neckline/collar/hood, shoulder line, sleeve length, cuffs, armholes, chest/body width, side seams, hem length, closure/buttons/zipper, pockets, print/logo/embroidery and fabric drape.\n"
+                "Do not turn the top/shirt/jacket/hoodie into a dress, full outfit, pants, skirt or lower-body garment.\n"
+                "Do not hide or crop off collar/hood, sleeves/cuffs, front closure, chest design, hem, side seams or product texture."
+            )
+        if area == "full_body":
+            return (
+                "FULL-BODY / SET PRODUCT IDENTITY LOCK:\n"
+                f"The product is {product_type}. Preserve the complete outfit structure: neckline/collar/straps, shoulders, sleeves, torso/body section, waistline or set transition, bottom/skirt/trouser section, length, hem, closure, pockets, seams, fabric texture and matching trims.\n"
+                "If this is a coordinated set, top and bottom must remain the same matching product family and neither component may be replaced by unrelated clothing.\n"
+                "If this is a dress, sarafan, jumpsuit, or one-piece garment, do not split it into separate top and bottom pieces.\n"
+                "Do not remove, redesign, shorten, or swap any visible component of the full-body product."
+            )
+        return ""
 
     @staticmethod
     def _article_context_block(garment_json: dict[str, Any]) -> str:
@@ -323,6 +354,7 @@ The product itself must remain visually identical to the source{" except for the
                 f"{', ' + ', '.join(variant_palette) if variant_palette else ''}.\n"
                 "- Use the uploaded product reference images ONLY for product structure: category, silhouette, length, waist, pockets, seams, closure, fabric texture and details.\n"
                 "- It is REQUIRED to recolor only the target garment from the structural reference color to the target variant color.\n"
+                "- The structural reference may show an old colorway such as black, navy, white, beige, or denim blue. Ignore that old colorway and use the target variant color as final.\n"
                 "- Do not recolor the model, skin, shoes, background, or complementary clothing.\n"
                 "- Do not copy logos, drawstrings, short length, pockets, silhouette, or category from any color-reference image.\n"
                 "- The same article must be shown; only the product color changes."
@@ -377,8 +409,10 @@ The product itself must remain visually identical to the source{" except for the
             area_prompt = (
                 "Garment area: upper body.\n\n"
                 "Replace only the upper-body garment with the uploaded product.\n\n"
+                "Preserve neckline/collar/hood, shoulder line, sleeves, cuffs, chest fit, front/back panels, closure, hem and fabric drape.\n\n"
+                "Do not convert the upper-body product into a dress, jumpsuit, pants, skirt or full outfit.\n\n"
                 "Keep shoes, face, hair, hands and body proportions unchanged.\n\n"
-                "Lower-body clothing may be restyled only as complementary clothing."
+                "Lower-body clothing may be restyled only as complementary clothing and must not become the selling focus."
             )
         elif area == "lower_body":
             category_name = garment_json.get("category", "").lower().strip()
@@ -403,8 +437,9 @@ The product itself must remain visually identical to the source{" except for the
             area_prompt = (
                 "Garment area: full body.\n\n"
                 "Dress the model in the uploaded full-body garment.\n\n"
-                "Preserve neckline, sleeves, waistline, silhouette, length, hem, fabric, color and details.\n\n"
-                "Do not convert the dress into a top, skirt, pants or shorts."
+                "Preserve neckline/collar/straps, sleeves, torso section, waistline or set transition, bottom/skirt/trouser section, silhouette, length, hem, fabric, color and details.\n\n"
+                "For coordinated sets, keep all components matching and do not replace only the top or only the bottom.\n\n"
+                "Do not convert a dress, sarafan, jumpsuit, or coordinated set into an unrelated top, skirt, pants, shorts, or mixed outfit."
             )
         else:
             area_prompt = ""
@@ -460,6 +495,7 @@ The product itself must remain visually identical to the source{" except for the
             variant_color_prompt,
             garment_rules_prompt,
             color_lock_prompt,
+            GPTPromptBuilder.garment_identity_lock_block(garment_json),
             f"Style Setting:\n{style_desc}",
             f"Pose Instruction:\n{pose_desc}",
             GPTPromptBuilder.product_focus_block(garment_json, product_focus),
@@ -534,6 +570,7 @@ The product itself must remain visually identical to the source{" except for the
                 f"Target color hex/palette: {variant_hex or 'n/a'}"
                 f"{', ' + ', '.join(variant_palette) if variant_palette else ''}.\n"
                 "Use the product reference image for structure only and recolor only the target garment to this variant color.\n"
+                "If the product reference image shows a different old colorway, ignore that old color and apply the target variant color as final.\n"
                 "Do not copy logos, drawstrings, short length, silhouette or category from any separate color-reference image.\n"
             )
         
@@ -601,6 +638,8 @@ Do not change the garment itself{" except recoloring the target garment to the v
 
 {variant_color_instruction}
 
+{GPTPromptBuilder.garment_identity_lock_block(garment_json)}
+
 The product is a {product_desc}.
 {area_instruction}
 
@@ -658,13 +697,26 @@ No fantasy fashion campaign.
 
         priorities = []
         if category == "denim":
-            priorities = ["distressing", "ripped areas", "wash pattern", "rhinestones", "studs"]
+            priorities = [
+                "waistband",
+                "front closure",
+                "button",
+                "zipper",
+                "pockets",
+                "side seams",
+                "hem",
+                "distressing",
+                "ripped areas",
+                "wash pattern",
+                "rhinestones",
+                "studs",
+            ]
         elif category == "shirt":
-            priorities = ["collar", "buttons", "embroidery", "logo"]
+            priorities = ["neckline", "collar", "shoulder seams", "sleeves", "cuffs", "buttons", "hem", "embroidery", "logo"]
         elif category == "jacket":
-            priorities = ["zipper", "pockets", "stitching", "logo"]
+            priorities = ["collar or hood", "zipper", "buttons", "pockets", "cuffs", "hem", "lining edge", "stitching", "logo"]
         elif category == "dress":
-            priorities = ["fabric texture", "waist details", "embellishments"]
+            priorities = ["neckline", "sleeves or straps", "waist details", "skirt/body section", "hem", "fabric texture", "embellishments"]
         elif category == "bottoms":
             priorities = ["waistband", "front closure", "button", "zipper", "pockets", "side seams", "leg width", "hem", "fabric texture"]
 
@@ -700,7 +752,14 @@ No fantasy fashion campaign.
         elif area == "upper_body":
             focus_instr += (
                 "\nThis is an upper-body product detail shot. Show ONLY details from the shirt, top, jacket, blouse, hoodie, or sweater. "
+                "Prioritize neckline/collar/hood, shoulders, sleeves/cuffs, closure, chest design, hem, fabric texture and stitching. "
                 "Do not show pants, shorts, skirt, shoes, legs, or lower-body garment detail."
+            )
+        elif area == "full_body":
+            focus_instr += (
+                "\nThis is a full-body garment or coordinated-set product detail shot. Show ONLY details from the product itself. "
+                "Prioritize neckline/collar/straps, sleeves, waistline or set transition, matching top/bottom trim, hem, closure, fabric texture and stitching. "
+                "Do not isolate an unrelated shirt, pants, shoes, accessory, or non-product clothing item."
             )
 
         prompt = (

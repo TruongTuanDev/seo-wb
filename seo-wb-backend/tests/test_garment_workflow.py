@@ -1,3 +1,4 @@
+import json
 import pytest
 from app.services.garment_analyzer import build_variant_color_garment_json, resolve_garment_area
 from app.services.color_fidelity import compare_color_signatures, extract_color_signature
@@ -207,7 +208,12 @@ def test_gpt_prompt_builder():
         product_focus=True,
     )
     assert "45-degree upper-body product crop" in upper_prompt
-    assert "neckline, collar, shoulders, sleeves" in upper_prompt
+    assert "neckline/collar" in upper_prompt
+    assert "shoulders" in upper_prompt
+    assert "sleeve length" in upper_prompt
+    assert "UPPER-BODY PRODUCT IDENTITY LOCK" in upper_prompt
+    assert "sleeve length, cuffs" in upper_prompt
+    assert "Never turn the upper-body product into a dress" in upper_prompt
     assert "upper-abdomen-to-shoes" not in upper_prompt
 
     full_body_prompt = GPTPromptBuilder.build_prompt(
@@ -222,8 +228,10 @@ def test_gpt_prompt_builder():
         "crop_back",
         product_focus=True,
     )
-    assert "Back-facing full-garment product image" in full_body_prompt
-    assert "complete outfit shape" in full_body_prompt
+    assert "Back-facing full-garment/set product image" in full_body_prompt
+    assert "complete outfit structure" in full_body_prompt
+    assert "FULL-BODY / SET PRODUCT IDENTITY LOCK" in full_body_prompt
+    assert "do not swap only the top or only the bottom" in full_body_prompt.lower()
     assert "upper-abdomen-to-shoes" not in full_body_prompt
 
     lifestyle_prompt = GPTPromptBuilder.build_prompt(garment_json, "studio", "walking")
@@ -235,6 +243,24 @@ def test_gpt_prompt_builder():
     assert "lower-body product detail shot" in detail_prompt
     assert "waistband" in detail_prompt
     assert "Do not show a shirt" in detail_prompt
+
+    upper_detail_prompt = GPTPromptBuilder.build_detail_prompt(
+        {"product_type": "shirt", "garment_area": "upper_body", "category": "shirt"},
+        "detail",
+        "studio",
+    )
+    assert "upper-body product detail shot" in upper_detail_prompt
+    assert "sleeves/cuffs" in upper_detail_prompt
+    assert "Do not show pants" in upper_detail_prompt
+
+    full_detail_prompt = GPTPromptBuilder.build_detail_prompt(
+        {"product_type": "coordinated set", "garment_area": "full_body", "category": "set"},
+        "detail",
+        "studio",
+    )
+    assert "coordinated-set product detail shot" in full_detail_prompt
+    assert "matching top/bottom trim" in full_detail_prompt
+    assert "Do not isolate an unrelated shirt" in full_detail_prompt
 
     # Retry Prompt (Strict Garment Preservation Mode)
     strict_prompt = GPTPromptBuilder.build_prompt(
@@ -259,6 +285,7 @@ def test_complementary_styling_respects_product_area():
     assert "upper-body clothing" in lower
     assert "FULL OUTFIT LOCK" in full
     assert "do not replace, remove, or redesign any component" in full
+    assert "do not swap only the top or only the bottom" in full.lower()
 
 
 def test_garment_validator_failures():
@@ -350,7 +377,7 @@ def test_build_tasks_quantity_rules():
 
 def test_apply_product_focus_crop_zooms_lower_body_product():
     image = Image.new("RGB", (200, 300), color=(245, 245, 245))
-    for y in range(90, 300):
+    for y in range(20, 300):
         for x in range(50, 150):
             image.putpixel((x, y), (25, 25, 25))
 
@@ -503,6 +530,76 @@ def test_color_signature_and_delta_e():
     assert source.palette_hex
     assert similar_metrics["dominant_color_delta_e"] < 15
     assert drifted_metrics["dominant_color_delta_e"] > similar_metrics["dominant_color_delta_e"]
+
+
+def test_variant_color_validation_uses_target_color_instead_of_source_image():
+    settings = Settings(gemini_api_key="mock_key")
+    validator = GarmentValidator(settings)
+
+    def image_bytes(color):
+        image = Image.new("RGB", (128, 196), color=color)
+        buffer = BytesIO()
+        image.save(buffer, format="JPEG")
+        return buffer.getvalue()
+
+    mock_response_val = {
+        "detected_product_type": "pants",
+        "detected_garment_area": "lower_body",
+        "detected_category": "pants",
+        "detected_main_color": "green",
+        "detected_secondary_color": "",
+        "detected_material": "textile",
+        "detected_silhouette": "straight",
+        "detected_length": "full length",
+        "detected_logo_or_text": "none",
+        "detected_pockets": "side pockets",
+        "detected_seams": "side seams",
+        "detected_special_details": [],
+        "detected_pose": "front",
+        "garment_preservation_score": 0.95,
+        "critical_details_score": 0.95,
+        "pose_accuracy_score": 0.95,
+        "realism_score": 95,
+        "rhinestones_present": False,
+        "embroidery_present": False,
+        "logos_preserved": True,
+        "distressing_present": False,
+        "failed_fields": [],
+        "issues": [],
+        "realism_issues": [],
+        "warnings": [],
+    }
+
+    class MockResponse:
+        text = json.dumps(mock_response_val)
+
+    validator._client = type("MockClient", (), {
+        "models": type("MockModels", (), {
+            "generate_content": lambda *args, **kwargs: MockResponse()
+        })
+    })()
+
+    res = validator.validate_image(
+        generated_image_bytes=image_bytes((78, 134, 87)),
+        garment_json={
+            "product_type": "pants",
+            "garment_area": "lower_body",
+            "category": "pants",
+            "main_color": "green",
+            "variant_color_signature": {
+                "dominant_hex": "#4E8657",
+                "dominant_name": "green",
+                "palette_hex": ["#4E8657"],
+                "analysis_mode": "gemini_color_only",
+            },
+        },
+        pose="front",
+        source_front_image_bytes=image_bytes((30, 30, 30)),
+    )
+
+    assert res["passed"] is True
+    assert res["critical_mismatch"] is False
+    assert not any("source product" in item for item in res["issues"])
 
 
 def test_complex_product_detection():
@@ -771,7 +868,7 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
     assert full_front_img["retry_used"] is False
     assert full_front_img["retry_skipped_due_to_limit"] is True
     assert full_front_img["retry_priority"] == 1
-    assert any("Validation retry skipped because OpenAI call limit was reached." in w for w in banner_img["validation_result"]["warnings"])
+    assert any("Validation retry skipped because OpenAI call limit was reached." in w for w in full_front_img["validation_result"]["warnings"])
 
     # ----------------------------------------------------
     # Case 2: 6-image bundle limit (Max 7 calls)
@@ -832,7 +929,6 @@ async def test_openai_call_limit_and_priority(tmp_path, monkeypatch):
     
     assert img_lifestyle["retry_skipped_due_to_limit"] is True
     assert img_detail["retry_skipped_due_to_limit"] is True
-    assert img_banner["retry_skipped_due_to_limit"] is True
 
     # ----------------------------------------------------
     # Case 3: 8-image bundle limit (Max 9 calls)

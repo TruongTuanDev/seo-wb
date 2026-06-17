@@ -10,7 +10,7 @@ from google.genai import types
 
 from app.core.config import Settings
 from app.core.errors import AppError
-from app.services.color_fidelity import compare_color_signatures, extract_color_signature
+from app.services.color_fidelity import ColorSignature, compare_color_signatures, extract_color_signature
 
 logger = logging.getLogger(__name__)
 
@@ -221,20 +221,23 @@ class GarmentValidator:
         major_color_shift = False
         slight_color_variation = False
         denim_family_drift = False
-        if source_image_bytes:
-            reference_signature = extract_color_signature(source_image_bytes, garment_json.get("garment_area"))
+        variant_reference_signature = _variant_color_reference_signature(garment_json)
+        if source_image_bytes or variant_reference_signature:
+            reference_signature = variant_reference_signature or extract_color_signature(source_image_bytes, garment_json.get("garment_area"))
             generated_signature = extract_color_signature(generated_image_bytes, garment_json.get("garment_area"))
             color_metrics = compare_color_signatures(reference_signature, generated_signature)
             if color_metrics["dominant_color_delta_e"] > dominant_threshold:
                 major_color_shift = True
-                msg = f"Dominant garment color drift is too high (DeltaE {color_metrics['dominant_color_delta_e']}, threshold {dominant_threshold})."
+                color_target = "target variant color" if variant_reference_signature else "source product"
+                msg = f"Dominant garment color drift from {color_target} is too high (DeltaE {color_metrics['dominant_color_delta_e']}, threshold {dominant_threshold})."
                 if msg not in issues:
                     issues.append(msg)
             elif color_metrics["dominant_color_delta_e"] > max(dominant_threshold * 0.7, dominant_threshold - 6):
                 slight_color_variation = True
             if color_metrics["palette_delta_e"] > palette_threshold:
                 major_color_shift = True
-                msg = f"Garment palette drift is too high (DeltaE {color_metrics['palette_delta_e']}, threshold {palette_threshold})."
+                color_target = "target variant color" if variant_reference_signature else "source product"
+                msg = f"Garment palette drift from {color_target} is too high (DeltaE {color_metrics['palette_delta_e']}, threshold {palette_threshold})."
                 if msg not in issues:
                     issues.append(msg)
             elif color_metrics["palette_delta_e"] > max(palette_threshold * 0.7, palette_threshold - 6):
@@ -305,7 +308,11 @@ class GarmentValidator:
         if wrong_garment_area:
             critical_issues.append("Wrong garment area.")
         if major_color_shift:
-            critical_issues.append("Major color shift from source product.")
+            critical_issues.append(
+                "Major color shift from target variant color."
+                if variant_reference_signature
+                else "Major color shift from source product."
+            )
         if major_silhouette_change:
             critical_issues.append("Major silhouette change from source garment.")
         if wrong_garment_length:
@@ -415,6 +422,15 @@ class GarmentValidator:
     @staticmethod
     def _build_prompt(garment_json: dict[str, Any], pose: str | None = None) -> str:
         ref_json_str = json.dumps(garment_json, ensure_ascii=False, indent=2)
+        variant_color_signature = garment_json.get("variant_color_signature") or {}
+        variant_color_instruction = ""
+        if isinstance(variant_color_signature, dict) and variant_color_signature:
+            variant_color_instruction = (
+                "\nVariant color validation mode:\n"
+                "- The source product reference may be an older colorway.\n"
+                "- Validate generated color against garment_json.main_color and garment_json.variant_color_signature, not against the old source image color.\n"
+                "- Do not mark color as failed merely because it differs from the source reference image.\n"
+            )
 
         # Visibility-aware instructions
         pose_instruction = ""
@@ -466,6 +482,7 @@ Analyze the uploaded generated catalog image and compare it to the reference gar
 Reference Garment Specification:
 {ref_json_str}
 
+{variant_color_instruction}
 {pose_instruction}
 {embellishment_instruction}
 
@@ -509,3 +526,45 @@ def _is_dark_palette(palette: list[tuple[int, int, int]]) -> bool:
         return False
     brightness = sum((r + g + b) / 3 for r, g, b in palette) / len(palette)
     return brightness < 120
+
+
+def _variant_color_reference_signature(garment_json: dict[str, Any]) -> ColorSignature | None:
+    signature = garment_json.get("variant_color_signature") or {}
+    if not isinstance(signature, dict):
+        return None
+
+    palette_hex = [str(item).strip() for item in signature.get("palette_hex") or [] if str(item).strip()]
+    dominant_hex = str(signature.get("dominant_hex") or "").strip()
+    if dominant_hex and dominant_hex not in palette_hex:
+        palette_hex.insert(0, dominant_hex)
+    if not palette_hex:
+        return None
+
+    palette_rgb: list[tuple[int, int, int]] = []
+    normalized_hex: list[str] = []
+    for item in palette_hex:
+        rgb = _parse_hex_color(item)
+        if rgb is None:
+            continue
+        normalized_hex.append("#{:02X}{:02X}{:02X}".format(*rgb))
+        palette_rgb.append(rgb)
+
+    if not palette_rgb:
+        return None
+
+    return ColorSignature(
+        dominant_hex=normalized_hex[0],
+        dominant_name=str(signature.get("dominant_name") or garment_json.get("main_color") or "variant color"),
+        palette_hex=normalized_hex,
+        palette_rgb=palette_rgb,
+    )
+
+
+def _parse_hex_color(value: str) -> tuple[int, int, int] | None:
+    text = str(value or "").strip().lstrip("#")
+    if len(text) != 6:
+        return None
+    try:
+        return int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
+    except ValueError:
+        return None

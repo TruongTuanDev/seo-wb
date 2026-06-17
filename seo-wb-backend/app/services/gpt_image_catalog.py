@@ -133,19 +133,19 @@ def _normalized_focus_crop_box(garment_area: str, pose: str) -> tuple[float, flo
     if area == "upper_body":
         boxes = {
             # Upper-body crops keep neckline/shoulders through hem; legs should not dominate.
-            "crop_front": (0.10, 0.08, 0.90, 0.84),
-            "crop_side_45": (0.14, 0.08, 0.92, 0.86),
-            "crop_back": (0.10, 0.08, 0.90, 0.86),
+            "crop_front": (0.08, 0.03, 0.92, 0.80),
+            "crop_side_45": (0.12, 0.03, 0.94, 0.82),
+            "crop_back": (0.08, 0.03, 0.92, 0.82),
         }
-        return boxes.get(pose_key, (0.10, 0.08, 0.90, 0.84))
+        return boxes.get(pose_key, (0.08, 0.03, 0.92, 0.80))
     if area == "full_body":
         boxes = {
             # Full-body garments need a tighter catalog frame, but the complete outfit must stay visible.
-            "crop_front": (0.08, 0.04, 0.92, 0.98),
-            "crop_side_45": (0.10, 0.04, 0.94, 0.98),
-            "crop_back": (0.08, 0.04, 0.92, 0.98),
+            "crop_front": (0.06, 0.02, 0.94, 0.99),
+            "crop_side_45": (0.08, 0.02, 0.96, 0.99),
+            "crop_back": (0.06, 0.02, 0.94, 0.99),
         }
-        return boxes.get(pose_key, (0.08, 0.04, 0.92, 0.98))
+        return boxes.get(pose_key, (0.06, 0.02, 0.94, 0.99))
     return None
 
 
