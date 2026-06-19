@@ -208,3 +208,33 @@ class AdminUsageSummaryResponse(BaseModel):
 
 
 GeneratedImageJobDetailResponse.model_rebuild()
+
+
+class SubscriptionPlanResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+    price: float
+    currency: str
+    monthly_quota: int  # number of product cards / month
+    monthly_credits: int  # number of images / month
+    monthly_cost_limit: float | None
+    max_images_per_job: int
+    allow_legacy_vton: bool
+    allow_gpt_image: bool
+    priority_queue: bool
+    is_active: bool
+
+
+class SubscriptionPlanUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    price: float | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=1, max_length=10)
+    monthly_quota: int | None = Field(default=None, ge=0)  # cards
+    monthly_credits: int | None = Field(default=None, ge=0)  # images
+    monthly_cost_limit: float | None = Field(default=None, ge=0)
+    max_images_per_job: int | None = Field(default=None, ge=1, le=100)
+    allow_legacy_vton: bool | None = None
+    allow_gpt_image: bool | None = None
+    priority_queue: bool | None = None
+    is_active: bool | None = None

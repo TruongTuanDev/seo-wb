@@ -12,6 +12,7 @@ from app.core.errors import AppError
 from app.core.security import clear_auth_cookies, hash_password
 from app.db.session import get_db
 from app.models.admin import AdminAiSettings, AdminAuditLog, GeneratedImageJob, ModelTemplate, UsageRecord
+from app.models.billing import SubscriptionPlan
 from app.models.user import User
 from app.schemas.admin import (
     AdminAiSettingsResponse,
@@ -28,6 +29,8 @@ from app.schemas.admin import (
     GeneratedImageJobResponse,
     ModelTemplateResponse,
     ModelTemplateUpsertRequest,
+    SubscriptionPlanResponse,
+    SubscriptionPlanUpdateRequest,
     UsageRecordResponse,
 )
 from app.schemas.auth import TokenResponse, UserResponse
@@ -559,6 +562,55 @@ def delete_model(
     db.commit()
     _log_admin_action(db, admin.id, "DELETE_MODEL", "model", model_id, {})
     return Response(status_code=204)
+
+
+def _plan_response(plan: SubscriptionPlan) -> SubscriptionPlanResponse:
+    return SubscriptionPlanResponse(
+        id=plan.id,
+        code=plan.code,
+        name=plan.name,
+        price=plan.price,
+        currency=plan.currency,
+        monthly_quota=plan.monthly_quota,
+        monthly_credits=plan.monthly_credits,
+        monthly_cost_limit=plan.monthly_cost_limit,
+        max_images_per_job=plan.max_images_per_job,
+        allow_legacy_vton=plan.allow_legacy_vton,
+        allow_gpt_image=plan.allow_gpt_image,
+        priority_queue=plan.priority_queue,
+        is_active=plan.is_active,
+    )
+
+
+@router.get("/plans", response_model=list[SubscriptionPlanResponse])
+def list_plans(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_admin),
+) -> list[SubscriptionPlanResponse]:
+    rows = db.scalars(select(SubscriptionPlan).order_by(SubscriptionPlan.price.asc())).all()
+    return [_plan_response(plan) for plan in rows]
+
+
+@router.put("/plans/{code}", response_model=SubscriptionPlanResponse)
+def update_plan(
+    code: str,
+    payload: SubscriptionPlanUpdateRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+) -> SubscriptionPlanResponse:
+    plan = db.scalar(select(SubscriptionPlan).where(SubscriptionPlan.code == code))
+    if plan is None:
+        raise AppError("plan_not_found", "Subscription plan not found.", 404)
+    changes: dict = {}
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        if getattr(plan, key) != value:
+            changes[key] = {"from": getattr(plan, key), "to": value}
+            setattr(plan, key, value)
+    db.commit()
+    db.refresh(plan)
+    if changes:
+        _log_admin_action(db, admin.id, "UPDATE_PLAN", "subscription_plan", plan.code, changes)
+    return _plan_response(plan)
 
 
 @router.get("/jobs", response_model=list[GeneratedImageJobResponse])

@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Bot, FolderKanban, Image, LogOut, Users } from "lucide-react";
+import { BarChart3, Bot, CreditCard, FolderKanban, Image, LogOut, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", icon: BarChart3 },
   { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/plans", label: "Plans", icon: CreditCard },
   { href: "/admin/models", label: "Models", icon: Image },
   { href: "/admin/jobs", label: "Jobs", icon: FolderKanban },
   { href: "/admin/usage", label: "Usage", icon: BarChart3 },

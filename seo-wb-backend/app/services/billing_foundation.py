@@ -122,27 +122,27 @@ def ensure_subscription_plan_seeds(db: Session) -> None:
     changed = False
     for plan_seed in SUBSCRIPTION_PLAN_SEEDS:
         row = existing.get(plan_seed.code)
-        payload = {
-            "name": plan_seed.name,
-            "price": plan_seed.price,
-            "currency": plan_seed.currency,
-            "monthly_credits": plan_seed.monthly_credits,
-            "monthly_quota": plan_seed.monthly_quota,
-            "monthly_cost_limit": plan_seed.monthly_cost_limit,
-            "max_images_per_job": plan_seed.max_images_per_job,
-            "allow_legacy_vton": plan_seed.allow_legacy_vton,
-            "allow_gpt_image": plan_seed.allow_gpt_image,
-            "priority_queue": plan_seed.priority_queue,
-            "is_active": True,
-        }
-        if row is None:
-            db.add(SubscriptionPlan(code=plan_seed.code, **payload))
-            changed = True
+        # Only seed plans that don't exist yet. Existing rows are left untouched so
+        # admin edits (price, quotas, limits) persist across restarts.
+        if row is not None:
             continue
-        for key, value in payload.items():
-            if getattr(row, key) != value:
-                setattr(row, key, value)
-                changed = True
+        db.add(
+            SubscriptionPlan(
+                code=plan_seed.code,
+                name=plan_seed.name,
+                price=plan_seed.price,
+                currency=plan_seed.currency,
+                monthly_credits=plan_seed.monthly_credits,
+                monthly_quota=plan_seed.monthly_quota,
+                monthly_cost_limit=plan_seed.monthly_cost_limit,
+                max_images_per_job=plan_seed.max_images_per_job,
+                allow_legacy_vton=plan_seed.allow_legacy_vton,
+                allow_gpt_image=plan_seed.allow_gpt_image,
+                priority_queue=plan_seed.priority_queue,
+                is_active=True,
+            )
+        )
+        changed = True
     if changed:
         db.commit()
 
