@@ -19,7 +19,7 @@ import { useCardForm } from "@/hooks/useCardForm";
 import { useDraftAutosave } from "@/hooks/useDraftAutosave";
 import { useJobStatus } from "@/hooks/useJobStatus";
 import { API_BASE, api, publicAssetUrl } from "@/lib/api";
-import { ArrowRight, ArrowLeft, RefreshCw, CheckCircle, UploadCloud } from "lucide-react";
+import { ArrowRight, ArrowLeft, RefreshCw, CheckCircle, UploadCloud, FileText } from "lucide-react";
 
 type CreationMode = "create_new" | "add_to_existing_imt" | "create_then_merge";
 
@@ -246,10 +246,8 @@ export function CreateCardClient() {
   const [gender, setGender] = useState("Женский");
   const [mode, setMode] = useState<"create_new" | "add_to_existing_imt" | "create_then_merge">("create_new");
   const [targetIMT, setTargetIMT] = useState("");
-  const [note, setNote] = useState(`Quần jeans nam ống suông, 98% cotton 2% spandex.
-Màu: xanh đậm và đen. size 25-30(40-50).
-Mã hàng: QJ-2024. Kiện 35x25x5 cm, nặng 0.6kg.
-Đặc điểm: lưng cao, 4 túi, khóa kéo kim loại, phù hợp mặc hằng ngày, mùa thu đông.`);
+  const [note, setNote] = useState("");
+  const [showTemplate, setShowTemplate] = useState(false);
 
   const [sizes, setSizes] = useState<SizeRow[]>([{ techSize: "", wbSize: "", sku: "" }]);
   const [dimensions, setDimensions] = useState({ length: 0, width: 0, height: 0, weightBrutto: 0 });
@@ -1038,15 +1036,31 @@ Mã hàng: QJ-2024. Kiện 35x25x5 cm, nặng 0.6kg.
               )}
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-700">User Setup Prompts / Notes (Optional)</label>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-sm font-medium text-zinc-700">User Setup Prompts / Notes (Optional)</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowTemplate((v) => !v)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-brand hover:text-brand"
+                  >
+                    <FileText size={13} /> {showTemplate ? "Ẩn mẫu" : "Template"}
+                  </button>
+                </div>
+
+                {showTemplate && (
+                  <div className="rounded-md border border-indigo-200 bg-indigo-50/70 p-3">
+                    <div className="mb-1.5 text-xs font-medium text-indigo-700">Mẫu nhập tham khảo — nhìn theo rồi nhập vào ô bên dưới:</div>
+                    <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-zinc-700">{`Quần jeans nam ống suông, 98% cotton 2% spandex.
+Màu: xanh đậm và đen. size 25-30(40-50).
+Mã hàng: QJ-2024. Kiện 35x25x5 cm, nặng 0.6kg.
+Đặc điểm: lưng cao, 4 túi, khóa kéo kim loại, phù hợp mặc hằng ngày, mùa thu đông.`}</pre>
+                  </div>
+                )}
+
                 <textarea
                   value={note}
                   onChange={e => setNote(e.target.value)}
-                  placeholder={`Ví dụ:
-Quần jeans nam ống suông, 98% cotton 2% spandex.
-Màu: xanh đậm và đen. size 25-30(40-50).
-Mã hàng: QJ-2024. Kiện 35x25x5 cm, nặng 0.6kg.
-Đặc điểm: lưng cao, 4 túi, khóa kéo kim loại, phù hợp mặc hằng ngày, mùa thu đông.`}
+                  placeholder="Nhập thông tin sản phẩm. Bấm “Template” để xem mẫu."
                   className="h-40 w-full rounded-md border border-zinc-300 bg-white p-3 text-sm text-zinc-900 shadow-soft-sm transition-colors duration-150 placeholder:text-zinc-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-indigo-100"
                 />
               </div>
