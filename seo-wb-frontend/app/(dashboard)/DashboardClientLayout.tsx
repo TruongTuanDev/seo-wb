@@ -66,7 +66,7 @@ export function DashboardClientLayout({ children }: { children: React.ReactNode 
   const productMenuItems = [
     { name: t("list"), href: "/cards", icon: List },
     { name: t("create"), href: "/cards/new", icon: PlusSquare },
-    { name: "Danh mục", href: "/categories", icon: Tags },
+    { name: t("navCategories"), href: "/categories", icon: Tags },
   ];
 
   const switchStore = (storeId: number) => {
@@ -156,7 +156,7 @@ export function DashboardClientLayout({ children }: { children: React.ReactNode 
               href={`tel:${SUPPORT_PHONE}`}
               className="hidden rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 lg:inline-flex"
             >
-              Hỗ trợ: {SUPPORT_PHONE}
+              {t("supportLabel")}: {SUPPORT_PHONE}
             </a>
           <div ref={accountRef} className="relative">
             <button

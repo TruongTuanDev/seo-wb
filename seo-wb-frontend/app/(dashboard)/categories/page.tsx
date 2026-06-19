@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { CategorySelector } from "@/components/cards/CategorySelector";
 import { useStore } from "@/contexts/StoreContext";
 import { useToast } from "@/contexts/ToastContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { api } from "@/lib/api";
 
 interface TnvedOption {
@@ -37,6 +38,7 @@ function getErrorMessage(err: unknown) {
 export default function ShopCategoriesPage() {
   const { currentStoreId } = useStore();
   const { success, error } = useToast();
+  const { t } = useLanguage();
 
   const [categories, setCategories] = useState<StoreCategory[]>([]);
   const [loading, setLoading] = useState(false);
@@ -51,7 +53,7 @@ export default function ShopCategoriesPage() {
     api
       .get(`/stores/${currentStoreId}/categories`)
       .then((data) => setCategories(Array.isArray(data) ? data : []))
-      .catch((err) => error("Không tải được danh mục", getErrorMessage(err)))
+      .catch((err) => error(t("catLoadFailed"), getErrorMessage(err)))
       .finally(() => setLoading(false));
   }, [currentStoreId, error]);
 
@@ -77,15 +79,20 @@ export default function ShopCategoriesPage() {
       setProgress({ total_scanned: st?.total_scanned ?? 0, categories_found: st?.categories_found ?? 0 });
       if (st?.status === "running") return false;
       if (st?.status === "completed") {
-        success("Đồng bộ danh mục xong", `Đã quét ${st.total_scanned} thẻ, tìm thấy ${st.categories_found} danh mục.`);
+        success(
+          t("catSyncDone"),
+          t("catSyncDoneDetail")
+            .replace("{n}", String(st.total_scanned ?? 0))
+            .replace("{m}", String(st.categories_found ?? 0))
+        );
       } else if (st?.status === "failed") {
-        error("Đồng bộ thất bại", st?.last_error || "Vui lòng thử lại.");
+        error(t("catSyncFailed"), st?.last_error || t("catSyncFailedRetry"));
       } else if (st?.status === "interrupted") {
-        error("Đồng bộ bị gián đoạn", "Hãy bấm đồng bộ lại.");
+        error(t("catSyncInterrupted"), t("catSyncInterruptedDetail"));
       }
       return true;
     } catch (err) {
-      error("Không lấy được trạng thái đồng bộ", getErrorMessage(err));
+      error(t("catStatusFailed"), getErrorMessage(err));
       return true;
     }
   }, [currentStoreId, success, error]);
@@ -117,14 +124,14 @@ export default function ShopCategoriesPage() {
       setProgress({ total_scanned: 0, categories_found: 0 });
       setSyncing(true);
     } catch (err) {
-      error("Không bắt đầu được đồng bộ", getErrorMessage(err));
+      error(t("catSyncStartFailed"), getErrorMessage(err));
     }
   };
 
   if (!currentStoreId) {
     return (
       <div className="mx-auto max-w-3xl">
-        <p className="text-sm text-zinc-500">Hãy chọn một shop để quản lý danh mục.</p>
+        <p className="text-sm text-zinc-500">{t("catSelectStore")}</p>
       </div>
     );
   }
@@ -133,47 +140,44 @@ export default function ShopCategoriesPage() {
     <div className="mx-auto max-w-4xl">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Danh mục shop</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Đồng bộ danh mục và mã TN VED shop đang dùng. AI chỉ chọn trong danh sách này khi tạo bài.
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{t("catTitle")}</h1>
+          <p className="mt-1 text-sm text-zinc-500">{t("catDesc")}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => setAddOpen(true)} disabled={syncing}>
-            <Plus size={16} /> Thêm danh mục
+            <Plus size={16} /> {t("catAdd")}
           </Button>
           <Button variant="brand" isLoading={syncing} disabled={syncing} onClick={handleSync}>
-            <FolderSync size={16} /> Đồng bộ danh mục
+            <FolderSync size={16} /> {t("catSync")}
           </Button>
         </div>
       </div>
 
       {syncing && (
         <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50/70 px-4 py-3 text-sm text-indigo-700">
-          Đang đồng bộ từ Wildberries… đã quét {progress?.total_scanned ?? 0} thẻ, tìm thấy{" "}
-          {progress?.categories_found ?? 0} danh mục. Bạn có thể rời trang, quá trình vẫn chạy.
+          {t("catSyncingDetail")
+            .replace("{n}", String(progress?.total_scanned ?? 0))
+            .replace("{m}", String(progress?.categories_found ?? 0))}
         </div>
       )}
 
       <div className="rounded-2xl border border-zinc-200 bg-white shadow-soft-sm">
         <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-3">
           <span className="text-sm font-medium text-zinc-700">
-            {categories.length} danh mục
+            {t("catCount").replace("{n}", String(categories.length))}
           </span>
           <button
             onClick={load}
             disabled={loading}
             className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-800 disabled:opacity-50"
           >
-            <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Tải lại
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> {t("catReload")}
           </button>
         </div>
 
         {categories.length === 0 ? (
           <div className="px-5 py-10 text-center text-sm text-zinc-500">
-            {loading
-              ? "Đang tải…"
-              : "Chưa có danh mục nào. Bấm “Đồng bộ danh mục” để lấy từ sản phẩm shop đang bán."}
+            {loading ? t("loading") : t("catEmpty")}
           </div>
         ) : (
           <div className="divide-y divide-zinc-100">
@@ -192,7 +196,7 @@ export default function ShopCategoriesPage() {
         )}
       </div>
 
-      <Modal isOpen={addOpen} onClose={() => setAddOpen(false)} title="Thêm danh mục thủ công">
+      <Modal isOpen={addOpen} onClose={() => setAddOpen(false)} title={t("catAddManualTitle")}>
         <AddCategoryForm
           storeId={currentStoreId}
           existingIds={categories.map((c) => c.subject_id)}
@@ -206,18 +210,21 @@ export default function ShopCategoriesPage() {
 
       <ConfirmDialog
         isOpen={deleteTarget !== null}
-        title="Xóa danh mục"
-        description={`Xóa “${deleteTarget?.subject_name || deleteTarget?.subject_id}” khỏi danh mục shop? AI sẽ không còn chọn danh mục này.`}
-        confirmLabel="Xóa"
+        title={t("catDeleteTitle")}
+        description={t("catDeleteDesc").replace(
+          "{name}",
+          String(deleteTarget?.subject_name || deleteTarget?.subject_id || "")
+        )}
+        confirmLabel={t("delete")}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={async () => {
           if (!deleteTarget) return;
           try {
             await api.delete(`/stores/${currentStoreId}/categories/${deleteTarget.id}`);
             setCategories((prev) => prev.filter((c) => c.id !== deleteTarget.id));
-            success("Đã xóa danh mục");
+            success(t("catDeleted"));
           } catch (err) {
-            error("Không xóa được", getErrorMessage(err));
+            error(t("catDeleteFailed"), getErrorMessage(err));
           } finally {
             setDeleteTarget(null);
           }
@@ -239,6 +246,7 @@ function CategoryRow({
   onDelete: () => void;
 }) {
   const { success, error } = useToast();
+  const { t } = useLanguage();
   const [tnved, setTnved] = useState(category.tnved ?? "");
   const [saving, setSaving] = useState(false);
 
@@ -255,9 +263,9 @@ function CategoryRow({
         tnved: tnved.trim(),
       });
       onChanged(updated);
-      success("Đã lưu mã TN VED");
+      success(t("catTnvedSaved"));
     } catch (err) {
-      error("Không lưu được", getErrorMessage(err));
+      error(t("catSaveFailed"), getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -268,7 +276,7 @@ function CategoryRow({
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-zinc-900">
-            {category.subject_name || `Subject ${category.subject_id}`}
+            {category.subject_name || t("catSubjectFallback").replace("{id}", String(category.subject_id))}
           </span>
           {category.locked && <Lock size={13} className="text-amber-500" />}
           <span
@@ -278,29 +286,29 @@ function CategoryRow({
                 : "bg-zinc-100 text-zinc-500"
             }`}
           >
-            {category.source === "manual" ? "thủ công" : "tự động"}
+            {category.source === "manual" ? t("catSourceManual") : t("catSourceAuto")}
           </span>
         </div>
         <p className="mt-0.5 text-xs text-zinc-400">
-          ID {category.subject_id} · {category.product_count} sản phẩm
+          ID {category.subject_id} · {t("catProductsCount").replace("{n}", String(category.product_count))}
           {category.tnved_options.length > 1 &&
-            ` · ${category.tnved_options.length} mã TN VED đã dùng`}
+            ` · ${t("catTnvedUsed").replace("{n}", String(category.tnved_options.length))}`}
         </p>
       </div>
       <div className="flex items-center gap-2">
         <Input
           value={tnved}
           onChange={(e) => setTnved(e.target.value)}
-          placeholder="Mã TN VED"
+          placeholder={t("catTnvedPlaceholder")}
           className="w-40 font-mono"
         />
         <Button variant="brand" size="sm" isLoading={saving} disabled={!dirty} onClick={save}>
-          Lưu
+          {t("save")}
         </Button>
         <button
           onClick={onDelete}
           className="rounded-lg p-2 text-zinc-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
-          aria-label="Xóa danh mục"
+          aria-label={t("catDeleteTitle")}
         >
           <Trash2 size={16} />
         </button>
@@ -321,6 +329,7 @@ function AddCategoryForm({
   onAdded: (cat: StoreCategory) => void;
 }) {
   const { error } = useToast();
+  const { t } = useLanguage();
   const [subjectId, setSubjectId] = useState<number | null>(null);
   const [subjectName, setSubjectName] = useState("");
   const [tnved, setTnved] = useState("");
@@ -328,11 +337,11 @@ function AddCategoryForm({
 
   const submit = async () => {
     if (!subjectId) {
-      error("Hãy chọn một danh mục");
+      error(t("catPickCategory"));
       return;
     }
     if (existingIds.includes(subjectId)) {
-      error("Danh mục này đã có trong danh sách");
+      error(t("catAlreadyExists"));
       return;
     }
     setSaving(true);
@@ -344,7 +353,7 @@ function AddCategoryForm({
       });
       onAdded(created);
     } catch (err) {
-      error("Không thêm được danh mục", getErrorMessage(err));
+      error(t("catAddFailed"), getErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -354,24 +363,25 @@ function AddCategoryForm({
     <div className="space-y-4">
       <CategorySelector
         storeId={storeId}
+        shopCatalogOnly={false}
         onSubjectSelected={(id, name) => {
           setSubjectId(id);
           setSubjectName(name);
         }}
       />
       <Input
-        label="Mã TN VED (tùy chọn)"
+        label={t("catTnvedOptional")}
         value={tnved}
         onChange={(e) => setTnved(e.target.value)}
-        placeholder="VD: 6204628990"
+        placeholder={t("catTnvedExample")}
         className="font-mono"
       />
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
         <Button variant="outline" onClick={onClose} disabled={saving}>
-          Hủy
+          {t("cancel")}
         </Button>
         <Button variant="brand" isLoading={saving} onClick={submit}>
-          Thêm
+          {t("catAddBtn")}
         </Button>
       </div>
     </div>

@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/contexts/ToastContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { Spinner } from "@/components/ui/Spinner";
 import { Input } from "@/components/ui/Input";
 
@@ -49,6 +50,7 @@ function ShopCatalogCategorySelector({
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const { error } = useToast();
+  const { t } = useLanguage();
 
   useEffect(() => {
     if (!storeId) return;
@@ -56,7 +58,7 @@ function ShopCatalogCategorySelector({
     api
       .get(`/stores/${storeId}/categories`)
       .then((data) => setCategories(Array.isArray(data) ? data : []))
-      .catch((err: unknown) => error("Không tải được danh mục shop", getErrorMessage(err)))
+      .catch((err: unknown) => error(t("cselLoadShopFailed"), getErrorMessage(err)))
       .finally(() => setLoading(false));
   }, [storeId, error]);
 
@@ -73,10 +75,10 @@ function ShopCatalogCategorySelector({
   return (
     <div className="flex flex-col gap-1.5">
       <label className="text-sm font-medium text-zinc-700">
-        Danh mục shop <span className="text-brand ml-1">*</span>
+        {t("cselShopLabel")} <span className="text-brand ml-1">*</span>
       </label>
       <Input
-        placeholder="Tìm danh mục trong shop…"
+        placeholder={t("cselSearchShop")}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
@@ -93,14 +95,14 @@ function ShopCatalogCategorySelector({
           className="flex h-10 w-full appearance-none rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-soft-sm transition-colors duration-150 focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-100 disabled:opacity-50"
         >
           <option value="" disabled>
-            Chọn danh mục
+            {t("cselChoose")}
           </option>
           {notInCatalog && selectedSubjectName && (
-            <option value={selectedSubjectId}>{selectedSubjectName} (ngoài catalog)</option>
+            <option value={selectedSubjectId}>{selectedSubjectName} {t("cselOutsideCatalog")}</option>
           )}
           {filtered.map((c) => (
             <option key={c.id} value={c.subject_id}>
-              {c.subject_name || `Subject ${c.subject_id}`}
+              {c.subject_name || t("catSubjectFallback").replace("{id}", String(c.subject_id))}
               {c.tnved ? ` · TNVED ${c.tnved}` : ""}
             </option>
           ))}
@@ -113,18 +115,14 @@ function ShopCatalogCategorySelector({
       </div>
 
       {!loading && categories.length === 0 && (
-        <p className="text-xs text-amber-600">
-          Chưa có danh mục nào trong catalog. Vào trang “Danh mục” để đồng bộ trước.
-        </p>
+        <p className="text-xs text-amber-600">{t("cselEmptyCatalog")}</p>
       )}
       {notInCatalog && (
-        <p className="text-xs text-amber-600">
-          Danh mục này chưa có trong catalog shop — hãy chọn lại hoặc thêm nó ở trang “Danh mục”.
-        </p>
+        <p className="text-xs text-amber-600">{t("cselNotInCatalog")}</p>
       )}
       {selectedTnved && (
         <p className="text-xs text-zinc-500">
-          Mã TNVED sẽ dùng: <span className="font-mono text-zinc-700">{selectedTnved}</span>
+          {t("cselTnvedWillUse")} <span className="font-mono text-zinc-700">{selectedTnved}</span>
         </p>
       )}
     </div>
@@ -142,6 +140,7 @@ function WbTreeCategorySelector({ storeId, selectedSubjectId, selectedSubjectNam
   const [loadingCats, setLoadingCats] = useState(false);
   const [loadingSubjects, setLoadingSubjects] = useState(false);
   const { error } = useToast();
+  const { t } = useLanguage();
   const onSubjectSelectedRef = useRef(onSubjectSelected);
 
   useEffect(() => {
@@ -186,7 +185,7 @@ function WbTreeCategorySelector({ storeId, selectedSubjectId, selectedSubjectNam
           setSelectedCategory(1);
         }
       } catch (err: unknown) {
-        error("Failed to fetch categories", getErrorMessage(err));
+        error(t("cselFetchCatsFailed"), getErrorMessage(err));
       } finally {
         setLoadingCats(false);
       }
@@ -222,7 +221,7 @@ function WbTreeCategorySelector({ storeId, selectedSubjectId, selectedSubjectNam
           }
         }
       } catch (err: unknown) {
-         error("Failed to fetch subjects", getErrorMessage(err));
+         error(t("cselFetchSubjFailed"), getErrorMessage(err));
       } finally {
         setLoadingSubjects(false);
       }
@@ -247,7 +246,7 @@ function WbTreeCategorySelector({ storeId, selectedSubjectId, selectedSubjectNam
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="flex flex-col gap-1.5">
          <label className="text-sm font-medium text-zinc-700">
-            Parent Category <span className="text-brand ml-1">*</span>
+            {t("cselParentCategory")} <span className="text-brand ml-1">*</span>
          </label>
          <div className="relative">
             <select
@@ -256,7 +255,7 @@ function WbTreeCategorySelector({ storeId, selectedSubjectId, selectedSubjectNam
               disabled={loadingCats}
               className="flex h-10 w-full appearance-none rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-soft-sm transition-colors duration-150 focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-100 disabled:opacity-50"
             >
-              <option value="" disabled>Select category</option>
+              <option value="" disabled>{t("cselSelectCategory")}</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
@@ -271,11 +270,11 @@ function WbTreeCategorySelector({ storeId, selectedSubjectId, selectedSubjectNam
 
       <div className="flex flex-col gap-1.5">
          <label className="text-sm font-medium text-zinc-700">
-            Subject (Item Type) <span className="text-brand ml-1">*</span>
+            {t("cselSubject")} <span className="text-brand ml-1">*</span>
          </label>
          <div className="flex flex-col gap-2">
            <Input
-             placeholder="Search subject (e.g. Брюки)"
+             placeholder={t("cselSearchSubject")}
              value={subjectQuery}
              onChange={(e) => setSubjectQuery(e.target.value)}
            />
@@ -286,7 +285,7 @@ function WbTreeCategorySelector({ storeId, selectedSubjectId, selectedSubjectNam
                 disabled={!selectedCategory || loadingSubjects}
                 className="flex h-10 w-full appearance-none rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-soft-sm transition-colors duration-150 focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-100 disabled:opacity-50"
               >
-                <option value="" disabled>Select subject</option>
+                <option value="" disabled>{t("cselSelectSubject")}</option>
                 {selectedSubjectId && selectedSubjectName && !subjects.some((s) => s.id === selectedSubjectId) && (
                   <option value={selectedSubjectId}>{selectedSubjectName}</option>
                 )}
