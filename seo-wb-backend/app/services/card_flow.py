@@ -18,6 +18,7 @@ from app.services.gemini_analyzer import GeminiAnalyzer
 from app.services.subject_resolver import SubjectResolver
 from app.services.tnved_selector import FashionTnvedSelector
 from app.services.wb_client import WildberriesClient
+from app.services.wb_prices_client import WbPricesClient
 from starlette.concurrency import run_in_threadpool
 
 
@@ -180,6 +181,24 @@ class CardFlowService:
             tnved=selected,
         )
         return {"payload": payload, "tnved": selected, "applied": True, "data": scored, "selectionHint": hint.__dict__}
+
+    async def apply_prices(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        return await WbPricesClient(self._settings, self._wb_api_key).update_prices(items)
+
+    async def get_applied_prices(self, nm_ids: list[int]) -> dict[int, int]:
+        """Return {nmID: base price} currently on WB, for verification."""
+        client = WbPricesClient(self._settings, self._wb_api_key)
+        applied: dict[int, int] = {}
+        for nm_id in nm_ids:
+            goods = await client.get_goods(filter_nm_id=nm_id, limit=10)
+            for good in goods:
+                if int(good.get("nmID") or 0) != nm_id:
+                    continue
+                sizes = good.get("sizes") or []
+                price = next((s.get("price") for s in sizes if s.get("price")), None)
+                if price is not None:
+                    applied[nm_id] = int(price)
+        return applied
 
     async def upload_media_links(self, nm_id: int, links: list[str]) -> dict[str, Any]:
         return await self._wb.upload_media_links(nm_id, links)

@@ -91,7 +91,10 @@ class CardJobRunner:
                     raise
                 self._mark(db, job, "running", "media_verified")
 
-            self._mark(db, job, "completed", "completed", {"wb_response": wb_response, "nm_map": nm_map})
+            self._mark(db, job, "running", "setting_prices")
+            price_result = await self._set_prices(flow, job.price_manifest, nm_map)
+
+            self._mark(db, job, "completed", "completed", {"wb_response": wb_response, "nm_map": nm_map, "prices": price_result})
             self._complete_draft(db, job, wb_response, nm_map)
         except Exception as exc:
             db.rollback()
@@ -353,6 +356,44 @@ class CardJobRunner:
                     await asyncio.sleep(min(30.0, 5.0 * attempt))
                     continue
                 raise
+
+    async def _set_prices(
+        self,
+        flow: CardFlowService,
+        price_manifest: dict[str, Any],
+        nm_map: dict[str, int],
+    ) -> dict[str, Any]:
+        """Apply per-variant prices on WB after the card has an nmID. A pricing
+        failure never fails the whole job — the card is already live."""
+        items_in = (price_manifest or {}).get("items") or []
+        price_items: list[dict[str, Any]] = []
+        for entry in items_in:
+            vendor_code = str(entry.get("vendorCode") or "")
+            nm_id = nm_map.get(vendor_code)
+            price = entry.get("price")
+            if not nm_id or not price:
+                continue
+            item: dict[str, Any] = {"nmID": int(nm_id), "price": int(price)}
+            if entry.get("discount") is not None:
+                item["discount"] = int(entry["discount"])
+            price_items.append(item)
+
+        if not price_items:
+            return {"applied": False, "reason": "no_prices"}
+
+        try:
+            await flow.apply_prices(price_items)
+        except Exception as exc:  # noqa: BLE001 - report, do not fail the publish
+            return {"applied": False, "error": str(exc)[:500], "submitted": price_items}
+
+        verified: dict[str, int] = {}
+        try:
+            await asyncio.sleep(6)
+            applied = await flow.get_applied_prices([item["nmID"] for item in price_items])
+            verified = {str(nm_id): price for nm_id, price in applied.items()}
+        except Exception:  # noqa: BLE001 - verification is best-effort
+            verified = {}
+        return {"applied": True, "submitted": price_items, "verified": verified}
 
     async def _verify_media_complete(
         self,

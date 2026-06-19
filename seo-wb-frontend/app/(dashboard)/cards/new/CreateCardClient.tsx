@@ -577,13 +577,22 @@ export function CreateCardClient() {
       formData.append("target_imt", targetIMT.trim());
     }
 
+    const priceItems: { vendorCode: string; price: number; discount?: number }[] = [];
     for (const variant of variants) {
       variant.images.forEach((image, index) => {
         formData.append("files", image);
         mediaItems.push({ vendorCode: variant.vendorCode.trim(), photoNumber: index + 1 });
       });
+      if (variant.price && variant.price > 0) {
+        priceItems.push({
+          vendorCode: variant.vendorCode.trim(),
+          price: Math.round(variant.price),
+          ...(variant.discount && variant.discount > 0 ? { discount: Math.round(variant.discount) } : {}),
+        });
+      }
     }
     formData.append("media_manifest_json", JSON.stringify({ items: mediaItems }));
+    formData.append("price_manifest_json", JSON.stringify({ items: priceItems }));
     return formData;
   };
 

@@ -10,6 +10,8 @@ export interface VariantCardState {
   images: File[];
   characteristics: Characteristic[];
   sizes: SizeRow[];
+  price?: number;
+  discount?: number;
 }
 
 export interface PackageDimensions {

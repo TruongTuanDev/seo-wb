@@ -122,6 +122,31 @@ export function ProductDetailsForm({
         </div>
       </div>
 
+      <div className="space-y-4 rounded-xl border border-zinc-200 bg-white p-6 shadow-soft-sm">
+        <h2 className="text-lg font-semibold text-zinc-950">{t("pdfPricing")}</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Input
+            label={t("pdfPrice")}
+            type="number"
+            value={activeVariant?.price ?? ""}
+            onChange={(event) =>
+              onUpdateVariant({ price: event.target.value ? Number(event.target.value) : undefined })
+            }
+            placeholder="0"
+          />
+          <Input
+            label={t("pdfDiscount")}
+            type="number"
+            value={activeVariant?.discount ?? ""}
+            onChange={(event) =>
+              onUpdateVariant({ discount: event.target.value ? Number(event.target.value) : undefined })
+            }
+            placeholder="0"
+          />
+        </div>
+        <p className="text-xs text-zinc-400">{t("pdfPriceHint")}</p>
+      </div>
+
       <div className="space-y-5 rounded-xl border border-zinc-200 bg-white p-6 shadow-soft-sm">
         <h2 className="text-lg font-semibold text-zinc-950">{t("pdfChars")}</h2>
         <CharacteristicsEditor
