@@ -246,7 +246,10 @@ export function CreateCardClient() {
   const [gender, setGender] = useState("Женский");
   const [mode, setMode] = useState<"create_new" | "add_to_existing_imt" | "create_then_merge">("create_new");
   const [targetIMT, setTargetIMT] = useState("");
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(`Quần jeans nam ống suông, 98% cotton 2% spandex.
+Màu: xanh đậm và đen. size 25-30(40-50).
+Mã hàng: QJ-2024. Kiện 35x25x5 cm, nặng 0.6kg.
+Đặc điểm: lưng cao, 4 túi, khóa kéo kim loại, phù hợp mặc hằng ngày, mùa thu đông.`);
 
   const [sizes, setSizes] = useState<SizeRow[]>([{ techSize: "", wbSize: "", sku: "" }]);
   const [dimensions, setDimensions] = useState({ length: 0, width: 0, height: 0, weightBrutto: 0 });
@@ -1039,8 +1042,12 @@ export function CreateCardClient() {
                 <textarea
                   value={note}
                   onChange={e => setNote(e.target.value)}
-                  placeholder="e.g. женские брюки, черный цвет, хлопок, высокая посадка"
-                  className="h-28 w-full rounded-md border border-zinc-300 bg-white p-3 text-sm text-zinc-900 shadow-soft-sm transition-colors duration-150 placeholder:text-zinc-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                  placeholder={`Ví dụ:
+Quần jeans nam ống suông, 98% cotton 2% spandex.
+Màu: xanh đậm và đen. size 25-30(40-50).
+Mã hàng: QJ-2024. Kiện 35x25x5 cm, nặng 0.6kg.
+Đặc điểm: lưng cao, 4 túi, khóa kéo kim loại, phù hợp mặc hằng ngày, mùa thu đông.`}
+                  className="h-40 w-full rounded-md border border-zinc-300 bg-white p-3 text-sm text-zinc-900 shadow-soft-sm transition-colors duration-150 placeholder:text-zinc-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-indigo-100"
                 />
               </div>
             </div>
