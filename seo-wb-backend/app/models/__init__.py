@@ -12,6 +12,7 @@ from app.models.finance import (
     WbFinanceSyncState,
 )
 from app.models.seller import Seller
+from app.models.shop_category import StoreCategory, StoreCategorySyncState
 from app.models.shop_model import ShopModel
 from app.models.store import Store
 from app.models.user import User
@@ -33,6 +34,8 @@ __all__ = [
     "ProductFinanceSetting",
     "Seller",
     "ShopModel",
+    "StoreCategory",
+    "StoreCategorySyncState",
     "SellerFinanceAutomationState",
     "SellerFinanceSettings",
     "Store",

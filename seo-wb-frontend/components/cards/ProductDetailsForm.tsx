@@ -68,6 +68,7 @@ export function ProductDetailsForm({
             selectedSubjectId={subjectId || undefined}
             selectedSubjectName={subjectName || undefined}
             onSubjectSelected={onSetSubject}
+            shopCatalogOnly
           />
         </div>
 

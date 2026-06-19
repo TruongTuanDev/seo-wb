@@ -7,6 +7,7 @@ from app.core.concurrency import run_ai_limited
 from app.core.errors import AppError
 from app.core.security import decrypt_secret
 from app.models.card import CardDraft
+from app.models.shop_category import StoreCategory
 from app.models.store import Store
 from app.models.user import User
 from app.schemas.card import CardUploadGroup, ImageAnalysis, ProductInput
@@ -230,7 +231,24 @@ class CardFlowService:
             size["skus"] = [str(barcode)]
 
     async def _resolve_subject(self, user_input: ProductInput, analysis: ImageAnalysis) -> dict[str, Any]:
-        return await SubjectResolver(self._settings, self._wb).resolve(user_input, analysis)
+        allowed = self._allowed_subject_ids()
+        return await SubjectResolver(self._settings, self._wb).resolve(
+            user_input, analysis, allowed_subject_ids=allowed
+        )
+
+    def _allowed_subject_ids(self) -> set[int]:
+        rows = self._db.query(StoreCategory.subject_id).filter_by(store_id=self._store.id).all()
+        return {int(row[0]) for row in rows if row[0] is not None}
+
+    def _shop_tnved(self, subject_id: int) -> dict[str, Any] | None:
+        row = (
+            self._db.query(StoreCategory)
+            .filter_by(store_id=self._store.id, subject_id=subject_id)
+            .one_or_none()
+        )
+        if row is not None and row.tnved:
+            return {"tnved": str(row.tnved)}
+        return None
 
     async def _enrich_payload(
         self,
@@ -243,15 +261,19 @@ class CardFlowService:
     ) -> None:
         charcs = await self._wb.get_subject_charcs(subject_id, locale="ru")
         seasons = await self._wb.get_seasons(locale="ru")
-        tnved_items = await self._wb.get_tnved(subject_id, locale="ru")
-        hint = FashionTnvedSelector.build_hint(
-            subject_id=subject_id,
-            subject_name=subject_name,
-            user_input=user_input,
-            analysis=analysis,
-            payload=payload,
-        )
-        tnved, _ = FashionTnvedSelector.select_best(tnved_items, hint)
+        # Prefer the TN VED the shop already uses for this category so cards stay
+        # consistent with the shop; fall back to scoring WB's directory otherwise.
+        tnved = self._shop_tnved(subject_id)
+        if tnved is None:
+            tnved_items = await self._wb.get_tnved(subject_id, locale="ru")
+            hint = FashionTnvedSelector.build_hint(
+                subject_id=subject_id,
+                subject_name=subject_name,
+                user_input=user_input,
+                analysis=analysis,
+                payload=payload,
+            )
+            tnved, _ = FashionTnvedSelector.select_best(tnved_items, hint)
         CardPayloadEnricher(charcs, directories={"season": seasons}).enrich_payload(
             payload,
             subject_id=subject_id,

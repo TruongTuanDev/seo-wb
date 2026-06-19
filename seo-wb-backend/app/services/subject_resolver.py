@@ -37,12 +37,27 @@ class SubjectResolver:
         self._settings = settings
         self._wb = wb_client
 
-    async def resolve(self, user_input: ProductInput, analysis: ImageAnalysis) -> dict[str, Any]:
+    async def resolve(
+        self,
+        user_input: ProductInput,
+        analysis: ImageAnalysis,
+        allowed_subject_ids: set[int] | None = None,
+    ) -> dict[str, Any]:
         subjects = await self._wb.get_subjects(parent_id=None, locale="ru")
+        # Strict shop catalog: AI may only pick a subject the shop actually uses.
+        # An empty catalog means the shop hasn't synced yet, so we don't constrain.
+        if allowed_subject_ids:
+            subjects = [s for s in subjects if int(s.get("subjectID", 0)) in allowed_subject_ids]
         if user_input.subject_id:
             for subject in subjects:
                 if int(subject.get("subjectID", 0)) == user_input.subject_id:
                     return subject
+            if allowed_subject_ids:
+                raise AppError(
+                    "subject_not_in_shop_catalog",
+                    "Selected subject is not in the shop category catalog. Sync categories or add it first.",
+                    422,
+                )
             raise AppError("subject_not_found", "Provided subject_id was not found in Wildberries subjects.", 422)
 
         source_text = self._source_text(user_input, analysis)

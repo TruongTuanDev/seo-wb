@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Box, Check, ChevronDown, List, ListChecks, LogOut, Plus, PlusSquare, Search, Settings, X } from "lucide-react";
+import { Box, Check, ChevronDown, List, ListChecks, LogOut, Plus, PlusSquare, Search, Settings, Tags, X } from "lucide-react";
 import { CreateStoreModal } from "@/components/dashboard/CreateStoreModal";
 import { StoreSettingsModal } from "@/components/dashboard/StoreSettingsModal";
 import { PageTransition } from "@/components/ui/PageTransition";
@@ -66,6 +66,7 @@ export function DashboardClientLayout({ children }: { children: React.ReactNode 
   const productMenuItems = [
     { name: t("list"), href: "/cards", icon: List },
     { name: t("create"), href: "/cards/new", icon: PlusSquare },
+    { name: "Danh mục", href: "/categories", icon: Tags },
   ];
 
   const switchStore = (storeId: number) => {
