@@ -92,8 +92,8 @@ SUBSCRIPTION_PLAN_SEEDS = [
 SUBSCRIPTION_PLAN_BY_CODE = {plan.code: plan for plan in SUBSCRIPTION_PLAN_SEEDS}
 
 
-def monthly_credits_for_plan(plan_type: str | None) -> int:
-    return get_usage_plan(plan_type).monthly_credits
+def monthly_credits_for_plan(plan_type: str | None, db=None) -> int:
+    return get_usage_plan(plan_type, db=db).monthly_credits
 
 
 def queue_name_for_plan(plan_type: str | None) -> str:
@@ -147,10 +147,10 @@ def ensure_subscription_plan_seeds(db: Session) -> None:
         db.commit()
 
 
-def initialize_user_credits(user: User) -> None:
+def initialize_user_credits(user: User, db=None) -> None:
     if int(getattr(user, "credits_granted", 0) or 0) > 0:
         return
-    monthly_credits = monthly_credits_for_plan(getattr(user, "plan_type", None))
+    monthly_credits = monthly_credits_for_plan(getattr(user, "plan_type", None), db=db)
     user.credit_balance = monthly_credits
     user.credits_granted = monthly_credits
     user.credits_used = 0
@@ -158,7 +158,7 @@ def initialize_user_credits(user: User) -> None:
 
 def reset_user_usage_and_credits(db: Session, user: User, *, actor_type: str = "system", actor_id: str | None = None) -> None:
     now = datetime.now(timezone.utc)
-    monthly_credits = monthly_credits_for_plan(user.plan_type)
+    monthly_credits = monthly_credits_for_plan(user.plan_type, db=db)
     previous_quota = int(user.used_quota or 0)
     previous_cost = float(user.used_cost or 0.0)
     previous_balance = int(user.credit_balance or 0)

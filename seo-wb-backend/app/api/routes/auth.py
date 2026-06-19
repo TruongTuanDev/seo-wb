@@ -59,7 +59,7 @@ def register(
     if existing:
         raise AppError("email_already_registered", "Email is already registered.", 409)
     user = User(name=payload.name, email=payload.email.lower(), password_hash=hash_password(payload.password))
-    apply_plan_defaults(user, "free")
+    apply_plan_defaults(user, "free", db=db)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -96,8 +96,11 @@ def me(user: Annotated[User, Depends(get_current_user)]) -> UserResponse:
 
 
 @router.get("/usage", response_model=UsageSummaryResponse)
-def usage_summary(user: Annotated[User, Depends(get_current_user)]) -> UsageSummaryResponse:
-    plan = get_usage_plan(user.plan_type)
+def usage_summary(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> UsageSummaryResponse:
+    plan = get_usage_plan(user.plan_type, db=db)
     monthly_quota = max(0, int(user.monthly_quota or 0))
     used_quota = max(0, int(user.used_quota or 0))
     remaining_quota = max(0, monthly_quota - used_quota)

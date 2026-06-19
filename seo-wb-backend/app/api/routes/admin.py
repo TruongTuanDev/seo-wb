@@ -208,7 +208,7 @@ def create_user(
         user.password_hash = hash_password(payload.password)
         user.role = _normalize_role(payload.role)
         user.status = _normalize_status(payload.status)
-        apply_plan_defaults(user, normalize_plan_type(payload.plan_type))
+        apply_plan_defaults(user, normalize_plan_type(payload.plan_type), db=db)
         user.monthly_quota = max(0, payload.monthly_quota or user.monthly_quota)
         if payload.monthly_cost_limit is not None:
             user.monthly_cost_limit = max(0.0, payload.monthly_cost_limit)
@@ -222,7 +222,7 @@ def create_user(
             role=_normalize_role(payload.role),
             status=_normalize_status(payload.status),
         )
-        apply_plan_defaults(user, normalize_plan_type(payload.plan_type))
+        apply_plan_defaults(user, normalize_plan_type(payload.plan_type), db=db)
         user.monthly_quota = max(0, payload.monthly_quota or user.monthly_quota)
         if payload.monthly_cost_limit is not None:
             user.monthly_cost_limit = max(0.0, payload.monthly_cost_limit)
@@ -238,7 +238,7 @@ def get_user(user_id: int, db: Session = Depends(get_db), _: User = Depends(get_
     user = db.get(User, user_id)
     if not user or user.deleted_at is not None:
         raise AppError("user_not_found", "User not found.", 404)
-    if reset_usage_if_due(user):
+    if reset_usage_if_due(user, db=db):
         db.commit()
         db.refresh(user)
     return _user_response(user)
@@ -269,7 +269,7 @@ def update_user(
         user.status = _normalize_status(payload.status)
     if payload.plan_type is not None:
         previous_plan = user.plan_type
-        plan = get_usage_plan(normalize_plan_type(payload.plan_type))
+        plan = get_usage_plan(normalize_plan_type(payload.plan_type), db=db)
         previous_monthly_quota = max(0, int(user.monthly_quota or 0))
         previous_credit_balance = max(0, int(user.credit_balance or 0))
         user.plan_type = plan.plan_type
@@ -384,7 +384,7 @@ def reset_user_quota(
     user = db.get(User, user_id)
     if not user or user.deleted_at is not None:
         raise AppError("user_not_found", "User not found.", 404)
-    reset_usage_cycle(user)
+    reset_usage_cycle(user, db=db)
     log_platform_audit(
         db,
         action="QUOTA_RESET",
@@ -789,7 +789,7 @@ def get_usage(
 
 
 def _user_response(user: User) -> AdminUserResponse:
-    plan = get_usage_plan(user.plan_type)
+    plan = get_usage_plan(user.plan_type, db=db)
     return AdminUserResponse(
         id=user.id,
         name=user.name,
@@ -837,7 +837,7 @@ def _dashboard_user_metric(user: User) -> AdminDashboardUserMetric:
 def _refresh_users_if_needed(db: Session, users: list[User]) -> bool:
     changed = False
     for user in users:
-        if reset_usage_if_due(user):
+        if reset_usage_if_due(user, db=db):
             changed = True
     if changed:
         db.commit()

@@ -58,7 +58,7 @@ def _get_current_user_by_cookie(
         db.commit()
         db.refresh(user)
         return user
-    if reset_usage_if_due(user):
+    if reset_usage_if_due(user, db=db):
         db.commit()
         db.refresh(user)
     return user

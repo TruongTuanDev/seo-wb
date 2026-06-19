@@ -145,8 +145,8 @@ def _enforce_user_cost_limit(user: User, estimated_cost: float) -> None:
         )
 
 
-def _enforce_plan_restrictions(user: User, quantity: int, *, job_type: str) -> None:
-    plan = get_usage_plan(getattr(user, "plan_type", None))
+def _enforce_plan_restrictions(user: User, quantity: int, *, job_type: str, db: Session | None = None) -> None:
+    plan = get_usage_plan(getattr(user, "plan_type", None), db=db)
     if quantity > plan.max_images_per_job:
         raise AppError(
             "plan_job_limit_exceeded",
@@ -441,7 +441,7 @@ async def enqueue_image_generation_job(
         raise AppError("draft_store_mismatch", "Draft does not belong to this store.", 400)
     runtime_config = _runtime_config(db, settings)
     quantity = _normalize_generation_quantity(quantity, runtime_config, settings.max_ai_product_images)
-    _enforce_plan_restrictions(user, quantity, job_type="image_generation")
+    _enforce_plan_restrictions(user, quantity, job_type="image_generation", db=db)
     credit_cost = credit_cost_for_job("openai", quantity)
     estimated_cost = _estimate_generation_cost(runtime_config, "openai", quantity)
     locked_user = _lock_user_for_generation_budget(db, user.id)
@@ -546,7 +546,7 @@ async def enqueue_try_on_job(
     if not runtime_config.get("allow_legacy_vton", True):
         raise AppError("legacy_vton_disabled", "Legacy virtual try-on is disabled by admin settings.", 403)
     quantity = _normalize_generation_quantity(quantity, runtime_config, settings.max_ai_product_images)
-    _enforce_plan_restrictions(user, quantity, job_type="try_on")
+    _enforce_plan_restrictions(user, quantity, job_type="try_on", db=db)
     credit_cost = credit_cost_for_job("try_on", quantity)
     estimated_cost = _estimate_generation_cost(runtime_config, "try_on", quantity)
     locked_user = _lock_user_for_generation_budget(db, user.id)
@@ -706,7 +706,7 @@ async def enqueue_gpt_image_job(
     runtime_config = _runtime_config(db, settings)
     quantity = _normalize_generation_quantity(quantity, runtime_config, settings.max_ai_product_images)
     quantity = _normalize_catalog_bundle_quantity(quantity)
-    _enforce_plan_restrictions(user, quantity, job_type="gpt_image")
+    _enforce_plan_restrictions(user, quantity, job_type="gpt_image", db=db)
     credit_cost = credit_cost_for_job("gpt_image", quantity)
     estimated_cost = _estimate_generation_cost(runtime_config, "gpt_image", quantity)
     locked_user = _lock_user_for_generation_budget(db, user.id)
@@ -828,7 +828,7 @@ async def enqueue_gpt_image_openai_job(
     runtime_config = _runtime_config(db, settings)
     quantity = _normalize_generation_quantity(quantity, runtime_config, settings.max_ai_product_images)
     quantity = _normalize_catalog_bundle_quantity(quantity)
-    _enforce_plan_restrictions(user, quantity, job_type="gpt_image_openai")
+    _enforce_plan_restrictions(user, quantity, job_type="gpt_image_openai", db=db)
     credit_cost = credit_cost_for_job("gpt_image_openai", quantity)
     estimated_cost = _estimate_generation_cost(runtime_config, "gpt_image_openai", quantity)
     locked_user = _lock_user_for_generation_budget(db, user.id)

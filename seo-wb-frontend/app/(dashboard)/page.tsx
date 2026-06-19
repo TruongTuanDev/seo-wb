@@ -30,6 +30,15 @@ type UsageSummary = {
   quota_reset_at: string | null;
 };
 
+type PlanCard = {
+  value: string;
+  label: string;
+  priceRub: number;
+  cards: number;
+  images: number;
+  description?: string;
+};
+
 function getGreeting(t: (k: string) => string) {
   const h = new Date().getHours();
   if (h < 12) return t("goodMorning");
@@ -43,6 +52,7 @@ export default function DashboardPage() {
   const { stores, currentStoreId, isLoading, addStore } = useStore();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [plans, setPlans] = useState<PlanCard[]>([...PLAN_OPTIONS]);
 
   const activeStore = stores.find((s) => s.id === currentStoreId) ?? null;
   const noStores = !isLoading && stores.length === 0;
@@ -55,6 +65,19 @@ export default function DashboardPage() {
     api.get("/auth/usage")
       .then((response) => setUsage(response as UsageSummary))
       .catch(() => setUsage(null));
+  }, []);
+
+  useEffect(() => {
+    // Plan specs come from the editable DB (admin changes show up live);
+    // fall back to the bundled defaults if the request fails.
+    api.get("/plans")
+      .then((data: PlanCard[]) => {
+        if (Array.isArray(data) && data.length) {
+          const descByValue = Object.fromEntries(PLAN_OPTIONS.map((p) => [p.value, p.description]));
+          setPlans(data.map((p) => ({ ...p, description: p.description ?? descByValue[p.value] })));
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const handleStoreCreated = (store: { id: number; name: string }) => {
@@ -205,7 +228,7 @@ export default function DashboardPage() {
           </div>
         </div>
         <div className="mt-5 grid gap-3 md:grid-cols-4">
-          {PLAN_OPTIONS.map((plan) => (
+          {plans.map((plan) => (
             <article key={plan.value} className="rounded-2xl border border-zinc-200 bg-gradient-to-b from-white to-zinc-50 p-4">
               <div className="text-sm font-semibold text-zinc-950">{plan.label}</div>
               <div className="mt-2 text-2xl font-bold text-zinc-950">{plan.priceRub.toLocaleString("ru-RU")} ₽</div>
@@ -213,7 +236,7 @@ export default function DashboardPage() {
                 <p>{plan.cards} thẻ tạo bài</p>
                 <p>{plan.images} ảnh AI</p>
               </div>
-              <p className="mt-3 text-xs text-zinc-500">{plan.description}</p>
+              {plan.description ? <p className="mt-3 text-xs text-zinc-500">{plan.description}</p> : null}
             </article>
           ))}
         </div>
