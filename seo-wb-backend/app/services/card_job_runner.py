@@ -21,6 +21,8 @@ from app.services.product_intent_parser import ProductIntentParser
 class CardJobRunner:
     def __init__(self, settings: Settings):
         self._settings = settings
+        # Spacing between media uploads to stay under WB's per-seller global limiter.
+        self._media_delay = float(getattr(settings, "wb_media_upload_delay_seconds", 0.8) or 0.8)
 
     async def run(self, job_id: int) -> None:
         await run_job_limited(self._settings, lambda: self._run(job_id))
@@ -78,7 +80,16 @@ class CardJobRunner:
                 await flow.move_nm_cards(list(nm_map.values()), job.target_imt, dry_run=False)
 
             self._mark(db, job, "running", "uploading_media")
-            await self._upload_media(flow, job.media_manifest, nm_map)
+            try:
+                await self._upload_media(flow, job.media_manifest, nm_map)
+            except AppError:
+                # The card already exists on WB at this point. A media error
+                # (typically a 429 rate limit) does not necessarily mean the
+                # photos are missing, so verify the real state on WB before
+                # treating the whole publish as failed.
+                if not await self._verify_media_complete(flow, job.media_manifest, nm_map):
+                    raise
+                self._mark(db, job, "running", "media_verified")
 
             self._mark(db, job, "completed", "completed", {"wb_response": wb_response, "nm_map": nm_map})
             self._complete_draft(db, job, wb_response, nm_map)
@@ -309,7 +320,8 @@ class CardJobRunner:
         return str(exc)[:4000]
 
     async def _upload_media(self, flow: CardFlowService, media_manifest: dict[str, Any], nm_map: dict[str, int]) -> None:
-        for item in media_manifest.get("items", []):
+        items = media_manifest.get("items", [])
+        for index, item in enumerate(items):
             vendor_code = str(item.get("vendorCode") or "")
             path = Path(str(item.get("path") or ""))
             photo_number = int(item.get("photoNumber") or 1)
@@ -317,4 +329,65 @@ class CardJobRunner:
             if not nm_id or not path.exists():
                 continue
             content = await asyncio.to_thread(path.read_bytes)
-            await flow.upload_media_file(nm_id, photo_number, path.name, content)
+            await self._upload_media_with_retry(flow, nm_id, photo_number, path.name, content)
+            # Space out requests so we don't trip WB's per-seller global limiter.
+            if index < len(items) - 1:
+                await asyncio.sleep(self._media_delay)
+
+    async def _upload_media_with_retry(
+        self,
+        flow: CardFlowService,
+        nm_id: int,
+        photo_number: int,
+        file_name: str,
+        content: bytes,
+        attempts: int = 5,
+    ) -> None:
+        for attempt in range(1, attempts + 1):
+            try:
+                await flow.upload_media_file(nm_id, photo_number, file_name, content)
+                return
+            except AppError as exc:
+                status = exc.details.get("status_code") if isinstance(exc.details, dict) else None
+                if status == 429 and attempt < attempts:
+                    await asyncio.sleep(min(30.0, 5.0 * attempt))
+                    continue
+                raise
+
+    async def _verify_media_complete(
+        self,
+        flow: CardFlowService,
+        media_manifest: dict[str, Any],
+        nm_map: dict[str, int],
+    ) -> bool:
+        """Check WB directly: a card is considered done when every variant has at
+        least the number of photos we tried to upload. WB may still be processing
+        photos right after upload, so retry a few times."""
+        expected: dict[str, int] = {}
+        for item in media_manifest.get("items", []):
+            vendor_code = str(item.get("vendorCode") or "")
+            path = Path(str(item.get("path") or ""))
+            if vendor_code and nm_map.get(vendor_code) and path.exists():
+                expected[vendor_code] = expected.get(vendor_code, 0) + 1
+        if not expected:
+            return True
+
+        for attempt in range(1, 4):
+            all_ok = True
+            for vendor_code, expected_count in expected.items():
+                nm_id = int(nm_map.get(vendor_code) or 0)
+                response = await flow.get_cards_by_text(vendor_code, limit=100, with_photo=-1)
+                cards = self._extract_cards(response)
+                card = next(
+                    (c for c in cards if int(c.get("nmID") or c.get("nmId") or c.get("nm_id") or 0) == nm_id),
+                    None,
+                )
+                photos = (card or {}).get("photos") or []
+                if len(photos) < expected_count:
+                    all_ok = False
+                    break
+            if all_ok:
+                return True
+            if attempt < 3:
+                await asyncio.sleep(5)
+        return False
