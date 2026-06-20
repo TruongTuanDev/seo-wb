@@ -861,9 +861,14 @@ export function MediaGallery({
               {!garmentJson ? (
                 <div className="space-y-4">
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <ImageInput label="Front Product Image *" required file={frontImage} onChange={(files) => selectFile(files, setFrontImage)} />
-                    <ImageInput label="Back Product Image (Optional)" file={backImage} onChange={(files) => selectFile(files, setBackImage)} />
+                    <ImageInput label="Front Product Image *" required file={productReferenceImages[0] || frontImage} onChange={(files) => selectFile(files, setFrontImage)} />
+                    <ImageInput label="Back Product Image (Optional)" file={productReferenceImages[1] || backImage} onChange={(files) => selectFile(files, setBackImage)} />
                   </div>
+                  {productReferenceImages.length > 0 && (
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                      Đang dùng ảnh bạn đã nạp ban đầu để phân tích &amp; sinh ảnh. 2 ảnh này KHÔNG được đăng lên WB.
+                    </div>
+                  )}
                   {validationError && (
                     <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 animate-fade-in">
                       {validationError}
