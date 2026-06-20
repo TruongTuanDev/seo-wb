@@ -468,6 +468,17 @@ export function CreateCardClient() {
     if (activeVariant.images.length === 0 && nextImages.length) setSelectedPhotoIndex(0);
   };
 
+  const useSourceImagesForActiveVariant = () => {
+    if (!activeVariant || !images.length) return;
+    const fileKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
+    const existing = new Set(activeVariant.images.map(fileKey));
+    const toAdd = images.filter((file) => !existing.has(fileKey(file)));
+    if (!toAdd.length) return;
+    const nextImages = [...activeVariant.images, ...toAdd].slice(0, 10);
+    updateActiveVariant({ images: nextImages });
+    if (activeVariant.images.length === 0 && nextImages.length) setSelectedPhotoIndex(0);
+  };
+
   const appendImagesToVariant = (variantId: string, files: File[]) => {
     if (!files.length) return;
     setVariants((current) =>
@@ -741,7 +752,9 @@ export function CreateCardClient() {
           description: variant?.description || "",
           vendorCode: variant?.vendorCode === "CHANGE-ME" ? "" : (variant?.vendorCode || ""),
           color: variantColor || generatedColor,
-          images: index === 0 ? images : [],
+          // Source (front/back) photos are for analysis only — not auto-published.
+          // The user can pull them in with the "Use source photos" button.
+          images: [],
           characteristics: variantCharcs,
           sizes: variant?.sizes ? normalizeSizes(variant.sizes) : generatedSizes,
         };
@@ -1163,6 +1176,8 @@ export function CreateCardClient() {
            recommendations={recommendations}
            draftId={draftId || undefined}
            productReferenceImages={images.slice(0, 2)}
+           onUseReferenceImages={useSourceImagesForActiveVariant}
+           useReferenceImagesLabel={t("useSourcePhotos")}
          />
        </div>
 

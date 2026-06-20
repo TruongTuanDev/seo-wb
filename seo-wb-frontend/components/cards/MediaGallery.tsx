@@ -236,6 +236,8 @@ interface MediaGalleryProps {
   recommendations?: RecommendationPayload | null;
   draftId?: string | number;
   productReferenceImages?: File[];
+  onUseReferenceImages?: () => void;
+  useReferenceImagesLabel?: string;
 }
 
 export function MediaGallery({
@@ -255,6 +257,8 @@ export function MediaGallery({
   recommendations,
   draftId,
   productReferenceImages = [],
+  onUseReferenceImages,
+  useReferenceImagesLabel = "Use source photos",
 }: MediaGalleryProps) {
   const { currentStoreId } = useStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -638,6 +642,17 @@ export function MediaGallery({
               }}
             />
           </label>
+          {onUseReferenceImages && productReferenceImages.length > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onUseReferenceImages}
+              disabled={!variant}
+            >
+              <ImagePlus size={14} className="mr-2" /> {useReferenceImagesLabel}
+            </Button>
+          )}
         </div>
       </div>
 
