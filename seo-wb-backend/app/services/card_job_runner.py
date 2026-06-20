@@ -94,7 +94,16 @@ class CardJobRunner:
             self._mark(db, job, "running", "setting_prices")
             price_result = await self._set_prices(flow, job.price_manifest, nm_map)
 
-            self._mark(db, job, "completed", "completed", {"wb_response": wb_response, "nm_map": nm_map, "prices": price_result})
+            self._mark(db, job, "running", "setting_stocks")
+            stock_result = await self._set_stocks(flow, job.warehouse_id, job.stock_manifest, nm_map)
+
+            self._mark(
+                db,
+                job,
+                "completed",
+                "completed",
+                {"wb_response": wb_response, "nm_map": nm_map, "prices": price_result, "stocks": stock_result},
+            )
             self._complete_draft(db, job, wb_response, nm_map)
         except Exception as exc:
             db.rollback()
@@ -394,6 +403,68 @@ class CardJobRunner:
         except Exception:  # noqa: BLE001 - verification is best-effort
             verified = {}
         return {"applied": True, "submitted": price_items, "verified": verified}
+
+    async def _set_stocks(
+        self,
+        flow: CardFlowService,
+        warehouse_id: int | None,
+        stock_manifest: dict[str, Any],
+        nm_map: dict[str, int],
+    ) -> dict[str, Any]:
+        """Apply per-size FBS stock to the chosen warehouse after the card has SKUs.
+        Stock is set by SKU (size barcode), so we resolve barcodes from WB per size.
+        A stock failure never fails the whole job — the card is already live."""
+        items_in = (stock_manifest or {}).get("items") or []
+        if not warehouse_id or not items_in:
+            return {"applied": False, "reason": "no_warehouse_or_stocks"}
+
+        stocks: list[dict[str, Any]] = []
+        for entry in items_in:
+            vendor_code = str(entry.get("vendorCode") or "")
+            if not nm_map.get(vendor_code):
+                continue
+            sku_by_size = await self._resolve_skus_by_size(flow, vendor_code, int(nm_map[vendor_code]))
+            for stock in entry.get("stocks") or []:
+                size = self._norm_size(stock.get("size"))
+                sku = sku_by_size.get(size)
+                if sku:
+                    stocks.append({"sku": str(sku), "amount": int(stock.get("amount") or 0)})
+
+        if not stocks:
+            return {"applied": False, "reason": "no_matching_skus"}
+
+        try:
+            await flow.apply_stocks(int(warehouse_id), stocks)
+        except Exception as exc:  # noqa: BLE001 - report, do not fail the publish
+            return {"applied": False, "error": str(exc)[:500], "submitted": stocks}
+        return {"applied": True, "warehouse_id": int(warehouse_id), "submitted": stocks}
+
+    @staticmethod
+    def _norm_size(value: Any) -> str:
+        return str(value or "").strip().casefold()
+
+    async def _resolve_skus_by_size(self, flow: CardFlowService, vendor_code: str, nm_id: int) -> dict[str, str]:
+        """Read the card from WB and map each size (techSize/wbSize) to its barcode."""
+        result: dict[str, str] = {}
+        try:
+            response = await flow.get_cards_by_text(vendor_code, limit=100, with_photo=-1)
+            cards = self._extract_cards(response)
+            card = next(
+                (c for c in cards if int(c.get("nmID") or c.get("nmId") or c.get("nm_id") or 0) == nm_id),
+                None,
+            )
+            for size in (card or {}).get("sizes") or []:
+                skus = size.get("skus") or []
+                if not skus:
+                    continue
+                barcode = str(skus[0])
+                for key in (size.get("techSize"), size.get("wbSize")):
+                    norm = self._norm_size(key)
+                    if norm:
+                        result.setdefault(norm, barcode)
+        except Exception:  # noqa: BLE001 - best effort
+            return result
+        return result
 
     async def _verify_media_complete(
         self,

@@ -162,6 +162,8 @@ export function ProductDetailsForm({
         <SizeTable
           sizes={activeVariant?.sizes || []}
           onChange={(nextSizes: SizeRow[]) => onUpdateVariant({ sizes: nextSizes })}
+          showQuantity
+          quantityLabel={t("sizeQuantity")}
         />
       </div>
 

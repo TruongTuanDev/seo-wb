@@ -9,15 +9,18 @@ export interface SizeRow {
   techSize: string;
   wbSize: string;
   sku: string;
+  quantity?: number;
 }
 
 interface SizeTableProps {
   sizes: SizeRow[];
   onChange: (sizes: SizeRow[]) => void;
   readOnly?: boolean;
+  showQuantity?: boolean;
+  quantityLabel?: string;
 }
 
-export function SizeTable({ sizes, onChange, readOnly = false }: SizeTableProps) {
+export function SizeTable({ sizes, onChange, readOnly = false, showQuantity = false, quantityLabel = "Qty (FBS)" }: SizeTableProps) {
   const addRow = () => {
     onChange([...sizes, { techSize: "", wbSize: "", sku: "" }]);
   };
@@ -42,6 +45,7 @@ export function SizeTable({ sizes, onChange, readOnly = false }: SizeTableProps)
               <th className="px-4 py-3 font-medium">Tech Size (Supplier)</th>
               <th className="px-4 py-3 font-medium">WB Size (Customer)</th>
               <th className="px-4 py-3 font-medium">Barcode / SKU</th>
+              {showQuantity && <th className="px-4 py-3 font-medium w-28">{quantityLabel}</th>}
               {!readOnly && <th className="px-4 py-3 font-medium text-right w-16">Actions</th>}
             </tr>
           </thead>
@@ -75,9 +79,27 @@ export function SizeTable({ sizes, onChange, readOnly = false }: SizeTableProps)
                     className="h-8"
                   />
                 </td>
+                {showQuantity && (
+                  <td className="p-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={row.quantity ?? ""}
+                      onChange={(e) => {
+                        const next = [...sizes];
+                        const v = e.target.value;
+                        next[idx] = { ...next[idx], quantity: v === "" ? undefined : Math.max(0, Number(v)) };
+                        onChange(next);
+                      }}
+                      placeholder="0"
+                      readOnly={readOnly}
+                      className="h-8"
+                    />
+                  </td>
+                )}
                 {!readOnly && (
                   <td className="p-2 text-right">
-                    <button 
+                    <button
                       type="button"
                       onClick={() => removeRow(idx)}
                       className="rounded p-1.5 text-zinc-500 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-500 disabled:opacity-30"

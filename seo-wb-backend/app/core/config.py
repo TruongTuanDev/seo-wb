@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     wb_finance_api_base_url: str = "https://finance-api.wildberries.ru"
     wb_common_api_base_url: str = "https://common-api.wildberries.ru"
     wb_prices_base_url: str = "https://discounts-prices-api.wildberries.ru"
+    wb_marketplace_base_url: str = "https://marketplace-api.wildberries.ru"
     enable_wb_raw_proxy: bool = False
     wb_live_tests: bool = False
     wb_live_full_product_sync: bool = False

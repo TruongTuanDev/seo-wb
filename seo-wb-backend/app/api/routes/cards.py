@@ -304,6 +304,38 @@ def _normalize_price_manifest(raw: Any) -> dict[str, Any]:
     return {"items": items}
 
 
+def _normalize_stock_manifest(raw: Any) -> dict[str, Any]:
+    """Validate the per-size FBS stock manifest sent from the client.
+
+    Shape: {"items": [{"vendorCode": str, "stocks": [{"size": str, "amount": int}]}]}.
+    Invalid entries are dropped so a bad stock value never blocks publishing.
+    """
+    items_raw = raw.get("items") if isinstance(raw, dict) else None
+    items: list[dict[str, Any]] = []
+    if isinstance(items_raw, list):
+        for entry in items_raw:
+            if not isinstance(entry, dict):
+                continue
+            vendor_code = str(entry.get("vendorCode") or "").strip()
+            stocks_raw = entry.get("stocks")
+            if not vendor_code or not isinstance(stocks_raw, list):
+                continue
+            stocks: list[dict[str, Any]] = []
+            for stock in stocks_raw:
+                if not isinstance(stock, dict):
+                    continue
+                size = str(stock.get("size") or "").strip()
+                try:
+                    amount = int(stock.get("amount"))
+                except (TypeError, ValueError):
+                    continue
+                if size and amount >= 0:
+                    stocks.append({"size": size, "amount": amount})
+            if stocks:
+                items.append({"vendorCode": vendor_code, "stocks": stocks})
+    return {"items": items}
+
+
 @router.post("/jobs", response_model=CardJobResponse)
 async def enqueue_card_job(
     store_id: int = Form(...),
@@ -311,6 +343,8 @@ async def enqueue_card_job(
     card_payload_json: str = Form(...),
     media_manifest_json: str = Form(default='{"items": []}'),
     price_manifest_json: str = Form(default='{"items": []}'),
+    stock_manifest_json: str = Form(default='{"items": []}'),
+    warehouse_id: int | None = Form(default=None),
     draft_id: int | None = Form(default=None),
     target_imt: int | None = Form(default=None),
     files: list[UploadFile] = File(default=[]),
@@ -333,11 +367,13 @@ async def enqueue_card_job(
         card_payload_raw = json.loads(card_payload_json)
         media_manifest_raw = json.loads(media_manifest_json)
         price_manifest_raw = json.loads(price_manifest_json)
+        stock_manifest_raw = json.loads(stock_manifest_json)
         card_payload = [CardUploadGroup.model_validate(group).model_dump(mode="json", exclude_none=True) for group in card_payload_raw]
     except Exception as exc:
         raise AppError("invalid_card_job_payload", "Card job payload is invalid.", 400, {"reason": str(exc)[:500]}) from exc
 
     price_manifest = _normalize_price_manifest(price_manifest_raw)
+    stock_manifest = _normalize_stock_manifest(stock_manifest_raw)
 
     # Enrich payload
     flow = CardFlowService(settings, db, user, store)
@@ -370,6 +406,8 @@ async def enqueue_card_job(
         card_payload=card_payload,
         media_manifest={"items": []},
         price_manifest=price_manifest,
+        warehouse_id=warehouse_id,
+        stock_manifest=stock_manifest,
     )
     db.add(job)
     db.commit()

@@ -18,6 +18,7 @@ from app.services.card_flow import CardFlowService
 from app.services.wb_common_client import WbCommonClient
 from app.services.wb_content_client import WbContentClient
 from app.services.wb_finance_client import WbFinanceClient
+from app.services.wb_marketplace_client import WbMarketplaceClient
 from app.services.wb_product_sync_service import WbProductSyncService
 from datetime import UTC, datetime
 
@@ -47,9 +48,24 @@ def _finance_client(db: Session, settings: Settings, user: User, store_id: int) 
     return WbFinanceClient(settings, api_key, db=db, seller_id=seller.id)
 
 
+def _marketplace_client(db: Session, settings: Settings, user: User, store_id: int) -> WbMarketplaceClient:
+    seller, api_key = _seller(db, settings, user, store_id)
+    return WbMarketplaceClient(settings, api_key, db=db, seller_id=seller.id)
+
+
 def _flow(db: Session, settings: Settings, user: User, store_id: int) -> CardFlowService:
     store = get_owned_store(db, user, store_id)
     return CardFlowService(settings, db, user, store)
+
+
+@router.get("/warehouses")
+async def warehouses(
+    store_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    user: Annotated[User, Depends(get_current_user)],
+):
+    return {"data": await _marketplace_client(db, settings, user, store_id).get_warehouses()}
 
 
 @router.get("/parent-categories")

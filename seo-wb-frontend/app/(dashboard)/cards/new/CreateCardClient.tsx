@@ -250,6 +250,8 @@ export function CreateCardClient() {
   const [targetIMT, setTargetIMT] = useState("");
   const [note, setNote] = useState("");
   const [showTemplate, setShowTemplate] = useState(false);
+  const [warehouses, setWarehouses] = useState<{ id: number; name: string }[]>([]);
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
 
   const [sizes, setSizes] = useState<SizeRow[]>([{ techSize: "", wbSize: "", sku: "" }]);
   const [dimensions, setDimensions] = useState({ length: 0, width: 0, height: 0, weightBrutto: 0 });
@@ -547,6 +549,23 @@ export function CreateCardClient() {
 
   const effectiveBrand = () => brand.trim() || "Нет бренда";
 
+  useEffect(() => {
+    if (!storeId) return;
+    api.get(`/wb/warehouses?store_id=${storeId}`)
+      .then((res) => {
+        const arr = Array.isArray(res) ? res : ((res as { data?: unknown })?.data ?? []);
+        const list = (Array.isArray(arr) ? arr : [])
+          .map((item) => {
+            const o = item as Record<string, unknown>;
+            return { id: Number(o.id ?? 0), name: String(o.name ?? "") };
+          })
+          .filter((w) => w.id);
+        setWarehouses(list);
+        if (list.length === 1) setWarehouseId(list[0].id);
+      })
+      .catch(() => {});
+  }, [storeId]);
+
   const buildVariantPayload = (variant: VariantCardState = activeVariant) => ({
     vendorCode: variant.vendorCode.trim(),
     title: variant.title.trim(),
@@ -604,6 +623,19 @@ export function CreateCardClient() {
     }
     formData.append("media_manifest_json", JSON.stringify({ items: mediaItems }));
     formData.append("price_manifest_json", JSON.stringify({ items: priceItems }));
+
+    // FBS stock (per size). Only sent when a warehouse is chosen and quantities are set.
+    const stockItems: { vendorCode: string; stocks: Array<{ size: string; amount: number }> }[] = [];
+    for (const variant of variants) {
+      const stocks = variant.sizes
+        .filter((size) => (size.quantity ?? 0) > 0 && (size.techSize || size.wbSize))
+        .map((size) => ({ size: (size.techSize || size.wbSize || "").trim(), amount: Math.round(size.quantity || 0) }));
+      if (stocks.length) stockItems.push({ vendorCode: variant.vendorCode.trim(), stocks });
+    }
+    if (warehouseId && stockItems.length) {
+      formData.append("warehouse_id", String(warehouseId));
+      formData.append("stock_manifest_json", JSON.stringify({ items: stockItems }));
+    }
     return formData;
   };
 
@@ -1180,6 +1212,33 @@ export function CreateCardClient() {
            useReferenceImagesLabel={t("useSourcePhotos")}
          />
        </div>
+
+       {warehouses.length > 0 && (
+         <div className="mt-6 rounded-xl border border-zinc-200 bg-zinc-50/70 p-4">
+           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+             <div>
+               <div className="text-sm font-medium text-zinc-800">{t("fbsWarehouse")}</div>
+               <p className="text-xs text-zinc-500">{t("fbsWarehouseHint")}</p>
+             </div>
+             {warehouses.length === 1 ? (
+               <span className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700">
+                 {warehouses[0].name}
+               </span>
+             ) : (
+               <select
+                 value={warehouseId ?? ""}
+                 onChange={(e) => setWarehouseId(e.target.value ? Number(e.target.value) : null)}
+                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm sm:w-64"
+               >
+                 <option value="">{t("fbsSelectWarehouse")}</option>
+                 {warehouses.map((w) => (
+                   <option key={w.id} value={w.id}>{w.name}</option>
+                 ))}
+               </select>
+             )}
+           </div>
+         </div>
+       )}
 
        <div className="mt-8 flex flex-col gap-4 border-t border-zinc-200 pt-6 sm:flex-row sm:justify-between">
           <Button

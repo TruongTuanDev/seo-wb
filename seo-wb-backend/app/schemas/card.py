@@ -54,6 +54,7 @@ class SizeItem(BaseModel):
     techSize: str | None = None
     wbSize: str | None = None
     price: int | None = None
+    quantity: int | None = None
     skus: list[str] = Field(default_factory=list)
 
 

@@ -312,6 +312,10 @@ const translations: Record<LangCode, Dict> = {
     noteTemplateBody: "Мужские джинсы прямого кроя, 98% хлопок 2% эластан.\nЦвет: тёмно-синий и чёрный. размеры 25-30(40-50).\nАртикул: QJ-2024. Упаковка 35x25x5 см, вес 0.6кг.\nОсобенности: высокая посадка, 4 кармана, металлическая молния, на каждый день, осень-зима.",
     notePlaceholder: "Введите информацию о товаре. Нажмите «Шаблон», чтобы увидеть пример.",
     useSourcePhotos: "Использовать исходные фото",
+    sizeQuantity: "Количество (FBS)",
+    fbsWarehouse: "Склад FBS",
+    fbsWarehouseHint: "Выберите склад, чтобы задать остатки по размерам. Пусто — без остатков.",
+    fbsSelectWarehouse: "Выберите склад",
   },
   en: {
     // ── Navigation ──
@@ -613,6 +617,10 @@ const translations: Record<LangCode, Dict> = {
     noteTemplateBody: "Men's straight-leg jeans, 98% cotton 2% spandex.\nColor: dark blue and black. size 25-30(40-50).\nVendor code: QJ-2024. Package 35x25x5 cm, weight 0.6kg.\nFeatures: high waist, 4 pockets, metal zipper, everyday wear, autumn-winter.",
     notePlaceholder: "Enter product details. Click “Template” to see an example.",
     useSourcePhotos: "Use source photos",
+    sizeQuantity: "Quantity (FBS)",
+    fbsWarehouse: "FBS warehouse",
+    fbsWarehouseHint: "Pick a warehouse to set per-size stock. Leave empty to skip stock.",
+    fbsSelectWarehouse: "Select warehouse",
   },
   zh: {
     // ── Navigation ──
@@ -914,6 +922,10 @@ const translations: Record<LangCode, Dict> = {
     noteTemplateBody: "男士直筒牛仔裤，98% 棉 2% 氨纶。\n颜色：深蓝色和黑色。尺码 25-30(40-50)。\n货号：QJ-2024。包装 35x25x5 厘米，重 0.6 公斤。\n特点：高腰，4 个口袋，金属拉链，日常穿着，秋冬。",
     notePlaceholder: "输入商品信息。点击“模板”查看示例。",
     useSourcePhotos: "使用原图",
+    sizeQuantity: "数量 (FBS)",
+    fbsWarehouse: "FBS 仓库",
+    fbsWarehouseHint: "选择仓库以按尺码设置库存。留空则不设置库存。",
+    fbsSelectWarehouse: "选择仓库",
   },
   vi: {
     // ── Navigation ──
@@ -1215,6 +1227,10 @@ const translations: Record<LangCode, Dict> = {
     noteTemplateBody: "Quần jeans nam ống suông, 98% cotton 2% spandex.\nMàu: xanh đậm và đen. size 25-30(40-50).\nMã hàng: QJ-2024. Kiện 35x25x5 cm, nặng 0.6kg.\nĐặc điểm: lưng cao, 4 túi, khóa kéo kim loại, phù hợp mặc hằng ngày, mùa thu đông.",
     notePlaceholder: "Nhập thông tin sản phẩm. Bấm “Template” để xem mẫu.",
     useSourcePhotos: "Dùng ảnh gốc",
+    sizeQuantity: "Số lượng (FBS)",
+    fbsWarehouse: "Kho FBS",
+    fbsWarehouseHint: "Chọn kho để đặt số lượng tồn theo size. Bỏ trống = không đặt tồn.",
+    fbsSelectWarehouse: "Chọn kho",
   },
 };
 

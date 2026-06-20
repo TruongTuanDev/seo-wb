@@ -18,6 +18,7 @@ from app.services.gemini_analyzer import GeminiAnalyzer
 from app.services.subject_resolver import SubjectResolver
 from app.services.tnved_selector import FashionTnvedSelector
 from app.services.wb_client import WildberriesClient
+from app.services.wb_marketplace_client import WbMarketplaceClient
 from app.services.wb_prices_client import WbPricesClient
 from starlette.concurrency import run_in_threadpool
 
@@ -181,6 +182,12 @@ class CardFlowService:
             tnved=selected,
         )
         return {"payload": payload, "tnved": selected, "applied": True, "data": scored, "selectionHint": hint.__dict__}
+
+    async def list_warehouses(self) -> list[dict[str, Any]]:
+        return await WbMarketplaceClient(self._settings, self._wb_api_key).get_warehouses()
+
+    async def apply_stocks(self, warehouse_id: int, stocks: list[dict[str, Any]]) -> Any:
+        return await WbMarketplaceClient(self._settings, self._wb_api_key).update_stocks(warehouse_id, stocks)
 
     async def apply_prices(self, items: list[dict[str, Any]]) -> dict[str, Any]:
         return await WbPricesClient(self._settings, self._wb_api_key).update_prices(items)
