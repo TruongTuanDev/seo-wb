@@ -31,29 +31,29 @@ export function Modal({ isOpen, onClose, title, description, children, className
   return createPortal(
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
       {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-zinc-900/40 backdrop-blur-sm animate-in fade-in duration-200"
+      <div
+        className="absolute inset-0 bg-zinc-950/50 backdrop-blur-md animate-in fade-in duration-200"
         onClick={onClose}
       />
-      
+
       {/* Dialog */}
       <div className={cn(
-        "relative z-10 max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-soft-xl animate-in fade-in zoom-in-95 duration-300",
+        "relative z-10 max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-soft-xl ring-1 ring-zinc-950/5 animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300",
         className
       )}>
-        <div className="flex items-center justify-between border-b border-zinc-200 px-6 py-4">
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-950">{title}</h2>
+        <div className="flex items-start justify-between gap-4 border-b border-zinc-100 px-6 py-4">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-950">{title}</h2>
             {description && <p className="text-sm text-zinc-500 mt-1">{description}</p>}
           </div>
-          <button 
+          <button
             onClick={onClose}
-            className="rounded-full p-1.5 text-zinc-500 transition-all duration-150 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
+            className="-mr-1 shrink-0 rounded-full p-1.5 text-zinc-400 transition-all duration-150 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
           >
             <X size={20} />
           </button>
         </div>
-        
+
         <div className="max-h-[calc(100vh-8rem)] overflow-y-auto p-6">
           {children}
         </div>

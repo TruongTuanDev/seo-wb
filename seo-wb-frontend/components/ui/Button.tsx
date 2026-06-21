@@ -14,20 +14,20 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         disabled={disabled || isLoading}
         className={cn(
-          "relative inline-flex min-w-0 items-center justify-center rounded-md font-medium whitespace-nowrap transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]",
+          "relative inline-flex min-w-0 items-center justify-center rounded-lg font-medium whitespace-nowrap transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70 disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98] active:translate-y-0",
           "focus-visible:ring-offset-2 focus-visible:ring-offset-white",
           {
             // Variants
-            "bg-brand text-white shadow-soft-sm hover:bg-brand-hover hover:shadow-soft-md": variant === "primary" || variant === "brand",
-            "bg-zinc-100 text-zinc-900 shadow-soft-sm hover:bg-zinc-200": variant === "secondary" || variant === "solid",
-            "border border-zinc-300 bg-white text-zinc-800 shadow-soft-sm hover:border-zinc-400 hover:bg-zinc-50": variant === "outline",
+            "bg-brand text-white shadow-soft-sm hover:bg-brand-hover hover:-translate-y-px hover:shadow-[var(--shadow-brand)]": variant === "primary" || variant === "brand",
+            "bg-zinc-100 text-zinc-900 shadow-soft-sm hover:bg-zinc-200 hover:shadow-soft-md": variant === "secondary" || variant === "solid",
+            "border border-zinc-300 bg-white text-zinc-800 shadow-soft-sm hover:border-zinc-400 hover:bg-zinc-50 hover:shadow-soft-md": variant === "outline",
             "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950": variant === "ghost",
-            "bg-rose-600 text-white shadow-soft-sm hover:bg-rose-700": variant === "danger",
-            
+            "bg-rose-600 text-white shadow-soft-sm hover:bg-rose-700 hover:-translate-y-px hover:shadow-[0_6px_16px_-4px_rgb(225_29_72_/_0.35)]": variant === "danger",
+
             // Sizes
-            "h-9 px-3 text-xs": size === "sm",
+            "h-9 px-3.5 text-xs": size === "sm",
             "h-10 px-4 py-2 text-sm": size === "md",
-            "h-11 rounded-md px-8": size === "lg",
+            "h-11 rounded-lg px-8": size === "lg",
             "h-10 w-10 p-2": size === "icon",
           },
           className
