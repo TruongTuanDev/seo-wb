@@ -144,7 +144,11 @@ class WbBaseClient:
                 max_connections=self._settings.wb_max_connections,
                 max_keepalive_connections=self._settings.wb_max_keepalive_connections,
             )
-            client = httpx.AsyncClient(base_url=self._base_url, limits=limits)
+            client = httpx.AsyncClient(
+                base_url=self._base_url,
+                limits=limits,
+                proxy=self._settings.wb_proxy_url or None,
+            )
             _clients[self._base_url] = client
             return client
 
@@ -189,8 +193,17 @@ class WbBaseClient:
                 timeout=timeout or self._settings.wb_timeout_seconds,
             )
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            self._log_diagnostic(method, path, None, request_meta, None, str(exc))
-            raise WbApiError("wildberries_network_failed", "Wildberries API request failed.", 502, {"reason": str(exc)[:500]}) from exc
+            # httpx timeout/connect errors often carry an empty str(exc); fall back to the
+            # exception class name so the failure stays diagnosable (e.g. "ConnectTimeout").
+            reason = str(exc) or type(exc).__name__
+            detail = f"{type(exc).__name__}: {self._host}{path}" if not str(exc) else str(exc)
+            self._log_diagnostic(method, path, None, request_meta, None, detail)
+            raise WbApiError(
+                "wildberries_network_failed",
+                "Wildberries API request failed.",
+                502,
+                {"reason": reason[:500], "host": self._host, "endpoint": path},
+            ) from exc
 
         payload = self._parse_payload(response)
         response_meta = self._sanitize_response_meta(response, payload)

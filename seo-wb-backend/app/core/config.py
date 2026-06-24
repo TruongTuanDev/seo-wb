@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     enable_image_validation_retry: bool = False
     image_generation_lock_ttl_seconds: int = 1800
 
+    # Optional HTTP(S) proxy for all Wildberries API calls. Set this when the host
+    # running the backend cannot reach WB directly (e.g. a VPS outside Russia that WB
+    # blocks). Example: "http://user:pass@1.2.3.4:8080" or "socks5://1.2.3.4:1080".
+    wb_proxy_url: str | None = None
     wb_timeout_seconds: float = 30.0
     wb_media_timeout_seconds: float = 120.0
     wb_max_connections: int = 50
