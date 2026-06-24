@@ -784,9 +784,10 @@ export function CreateCardClient() {
           description: variant?.description || "",
           vendorCode: variant?.vendorCode === "CHANGE-ME" ? "" : (variant?.vendorCode || ""),
           color: variantColor || generatedColor,
-          // Source (front/back) photos are for analysis only — not auto-published.
-          // The user can pull them in with the "Use source photos" button.
-          images: [],
+          // The first color reuses the uploaded source (front/back) photos so the user
+          // doesn't have to add them again. Other variants start empty and can pull the
+          // source photos in with the "Use source photos" button.
+          images: index === 0 ? [...images] : [],
           characteristics: variantCharcs,
           sizes: variant?.sizes ? normalizeSizes(variant.sizes) : generatedSizes,
         };
